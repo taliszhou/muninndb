@@ -11,6 +11,7 @@ import (
 type ProviderScheme string
 
 const (
+	SchemeLocal     ProviderScheme = "local"
 	SchemeOllama    ProviderScheme = "ollama"
 	SchemeOpenAI    ProviderScheme = "openai"
 	SchemeAnthropic ProviderScheme = "anthropic"
@@ -49,6 +50,17 @@ func ParseProviderURL(raw string) (*ProviderConfig, error) {
 	}
 
 	switch scheme {
+	case SchemeLocal:
+		// local://model-name — no host/port needed; assets are embedded in the binary.
+		model := parsed.Hostname()
+		if model == "" {
+			model = strings.TrimPrefix(parsed.Path, "/")
+		}
+		if model == "" {
+			model = "all-MiniLM-L6-v2"
+		}
+		config.Model = model
+		return config, nil
 	case SchemeOllama:
 		return parseOllamaURL(parsed, config)
 	case SchemeOpenAI:

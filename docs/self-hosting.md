@@ -52,7 +52,6 @@ docker run -d \
   -p 8477:8477 \
   -p 8750:8750 \
   -v muninndb-data:/data \
-  -e MUNINN_LOCAL_EMBED=1 \
   ghcr.io/scrypster/muninndb:latest
 ```
 
@@ -96,13 +95,15 @@ docker run -d --name muninndb -p 8474-8477:8474-8477 -p 8750:8750 \
 
 MuninnDB uses embeddings for semantic search and activation. Configure with environment variables:
 
-### Bundled (no API key, no internet)
+### Bundled (no API key, no internet) — default
+
+The bundled `all-MiniLM-L6-v2` INT8 model (384-dim, ~80MB) is active automatically when the binary was built with embedded assets. No configuration needed.
+
+To disable it and fall back to noop (or use a cloud provider instead):
 
 ```sh
-MUNINN_LOCAL_EMBED=1
+MUNINN_LOCAL_EMBED=0
 ```
-
-Uses the embedded `all-MiniLM-L6-v2` INT8 model. 384-dimensional, ~80MB model baked into the binary. Best for getting started quickly or air-gapped deployments.
 
 ### Ollama (local GPU/CPU, no API cost)
 
@@ -240,7 +241,7 @@ curl http://localhost:8750/mcp/health
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MUNINNDB_DATA` | `~/.muninn/data` | Data directory (binary) or `/data` (Docker) |
-| `MUNINN_LOCAL_EMBED` | `""` | Set to `"1"` to use bundled ONNX embedder |
+| `MUNINN_LOCAL_EMBED` | on | Set to `"0"` to disable the bundled ONNX embedder |
 | `MUNINN_OPENAI_KEY` | `""` | OpenAI API key for embeddings |
 | `MUNINN_OLLAMA_URL` | `""` | Ollama URL for embeddings, e.g. `ollama://localhost:11434/nomic-embed-text` |
 | `MUNINN_VOYAGE_KEY` | `""` | Voyage AI key for embeddings |

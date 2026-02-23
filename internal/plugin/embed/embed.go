@@ -61,6 +61,8 @@ func NewEmbedService(providerURL string) (*EmbedService, error) {
 
 	var prov Provider
 	switch provCfg.Scheme {
+	case plugin.SchemeLocal:
+		prov = &LocalProvider{}
 	case plugin.SchemeOllama:
 		prov = &OllamaProvider{}
 	case plugin.SchemeOpenAI:
@@ -103,6 +105,7 @@ func (s *EmbedService) Init(ctx context.Context, cfg plugin.PluginConfig) error 
 		BaseURL: s.provCfg.BaseURL,
 		Model:   s.provCfg.Model,
 		APIKey:  cfg.APIKey,
+		DataDir: cfg.DataDir,
 	}
 
 	slog.Info("initializing embed provider",

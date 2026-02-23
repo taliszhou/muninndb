@@ -13,17 +13,18 @@ services:
     volumes:
       - muninndb-data:/data
     environment:
-      # ── Embedder (choose one) ─────────────────────────────────────────────
-      # Bundled all-MiniLM-L6-v2 — no API key required. Enabled by default.
-      MUNINN_LOCAL_EMBED: "1"
+      # ── Embedder ──────────────────────────────────────────────────────────
+      # Bundled all-MiniLM-L6-v2 is on by default — no config needed.
+      # To switch to a cloud provider, set one of the vars below and
+      # optionally add MUNINN_LOCAL_EMBED: "0" to suppress the bundled model.
 
-      # Ollama (set MUNINN_LOCAL_EMBED to "" if using Ollama)
+      # Ollama
       # MUNINN_OLLAMA_URL: "ollama://ollama:11434/nomic-embed-text"
 
-      # OpenAI text-embedding-3-small (set MUNINN_LOCAL_EMBED to "")
+      # OpenAI text-embedding-3-small
       # MUNINN_OPENAI_KEY: ""
 
-      # Voyage voyage-3 (set MUNINN_LOCAL_EMBED to "")
+      # Voyage voyage-3
       # MUNINN_VOYAGE_KEY: ""
 
       # ── LLM enrichment (optional) ─────────────────────────────────────────

@@ -74,8 +74,8 @@ muninn server
 export MUNINN_VOYAGE_KEY="pa-..."
 muninn server
 
-# Bundled local model (if available from release assets)
-# Default behavior when MUNINN_LOCAL_EMBED is not explicitly set to "0"
+# Bundled local model — on by default, no config needed
+# Disable with MUNINN_LOCAL_EMBED=0
 muninn server
 ```
 

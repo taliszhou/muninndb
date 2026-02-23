@@ -39,9 +39,8 @@ VOLUME ["/data"]
 # MCP / AI tools 8750
 EXPOSE 8474 8475 8476 8477 8750
 
-# MUNINN_LOCAL_EMBED=1 activates the bundled all-MiniLM-L6-v2 model.
-# Override to "" and set MUNINN_OPENAI_KEY or MUNINN_OLLAMA_URL to use an external embedder.
-ENV MUNINN_LOCAL_EMBED=1
+# Bundled all-MiniLM-L6-v2 embedder is active by default.
+# Set MUNINN_LOCAL_EMBED=0 to disable and use MUNINN_OPENAI_KEY or MUNINN_OLLAMA_URL instead.
 
 ENTRYPOINT ["muninndb-server"]
 CMD ["--daemon", "--data", "/data"]

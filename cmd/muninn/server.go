@@ -97,7 +97,7 @@ func resolveEmbedInfo(cfg plugincfg.PluginConfig) rest.EmbedInfo {
 	case "none":
 		return rest.EmbedInfo{Provider: "none", Model: ""}
 	}
-	// Local bundled embedder: on by default when assets are available.
+	// Bundled local embedder: on by default. Opt out with MUNINN_LOCAL_EMBED=0.
 	if os.Getenv("MUNINN_LOCAL_EMBED") != "0" && embedpkg.LocalAvailable() {
 		return rest.EmbedInfo{Provider: "local", Model: "all-MiniLM-L6-v2"}
 	}
@@ -107,12 +107,13 @@ func resolveEmbedInfo(cfg plugincfg.PluginConfig) rest.EmbedInfo {
 // buildEmbedder constructs an embedder. Priority (highest → lowest):
 //  1. Environment variables (MUNINN_OLLAMA_URL, MUNINN_OPENAI_KEY, MUNINN_VOYAGE_KEY)
 //  2. Saved plugin_config.json (cfg parameter)
-//  3. Local bundled ONNX model (auto-enabled when assets are present)
+//  3. Bundled local ONNX model — enabled by default when the binary was built
+//     with embedded assets. Disable with MUNINN_LOCAL_EMBED=0.
 //  4. Noop
 //
 // Returns both the activation.Embedder (for query embedding) and the underlying
 // plugin.EmbedPlugin (for the RetroactiveProcessor), or nil for the plugin if noop.
-func buildEmbedder(ctx context.Context, cfg plugincfg.PluginConfig) (activation.Embedder, plugin.EmbedPlugin, error) {
+func buildEmbedder(ctx context.Context, cfg plugincfg.PluginConfig, dataDir string) (activation.Embedder, plugin.EmbedPlugin, error) {
 	const (
 		ollamaURL  = "MUNINN_OLLAMA_URL"
 		openaiKey  = "MUNINN_OPENAI_KEY"
@@ -181,12 +182,10 @@ func buildEmbedder(ctx context.Context, cfg plugincfg.PluginConfig) (activation.
 		}
 	}
 
-	// 3. Bundled local ONNX embedder (skipped if user explicitly chose "none" in config)
+	// 3. Bundled local ONNX model — on by default when embedded at build time.
+	// Skip only if the user explicitly opts out (MUNINN_LOCAL_EMBED=0) or chose
+	// "none" as their provider.
 	if cfg.EmbedProvider != "none" && os.Getenv(localEmbed) != "0" && embedpkg.LocalAvailable() {
-		dataDir := os.Getenv(localEmbed)
-		if dataDir == "" || dataDir == "1" {
-			dataDir = "muninndb-data"
-		}
 		slog.Info("initializing bundled local ONNX embedder", "data_dir", dataDir)
 		if svc := tryEmbedService("local://all-MiniLM-L6-v2", plugin.PluginConfig{DataDir: dataDir}); svc != nil {
 			return embedpkg.NewEmbedServiceAdapter(svc), svc, nil
@@ -198,8 +197,8 @@ func buildEmbedder(ctx context.Context, cfg plugincfg.PluginConfig) (activation.
 	slog.Warn("no embedder configured, semantic similarity disabled")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "  ⚠  No embedder configured — semantic search disabled.")
-	fmt.Fprintln(os.Stderr, "     To enable: set MUNINN_OLLAMA_URL, MUNINN_OPENAI_KEY, or MUNINN_VOYAGE_KEY")
-	fmt.Fprintln(os.Stderr, "     Or run `make fetch-assets && go build` to embed the bundled model.")
+	fmt.Fprintln(os.Stderr, "     To use a cloud embedder: set MUNINN_OLLAMA_URL, MUNINN_OPENAI_KEY, or MUNINN_VOYAGE_KEY")
+	fmt.Fprintln(os.Stderr, "     To disable this warning: set MUNINN_LOCAL_EMBED=0")
 	fmt.Fprintln(os.Stderr, "")
 	return activation.NewNoopEmbedder(), nil, nil
 }
@@ -475,7 +474,7 @@ func runServer() {
 
 	// Build embedder: env vars → saved config → local bundled → noop.
 	initCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	embedder, embedPlugin, err := buildEmbedder(initCtx, savedPluginCfg)
+	embedder, embedPlugin, err := buildEmbedder(initCtx, savedPluginCfg, *dataDir)
 	cancel()
 	if err != nil {
 		slog.Error("embedder build failed", "err", err)
@@ -630,12 +629,15 @@ func runServer() {
 	go contradictWorkerImpl.Worker.Run(ctx)
 	go confidenceWorkerImpl.Worker.Run(ctx)
 
-	// Start RetroactiveProcessor if a real embedder is configured
+	// Start RetroactiveProcessor if a real embedder is configured.
+	// It runs continuously, picking up newly written engrams via Notify() or its poll ticker.
 	var retroProcessor *plugin.RetroactiveProcessor
 	if embedPlugin != nil {
 		pStore := plugin.NewStoreAdapter(store, hnswRegistry)
 		retroProcessor = plugin.NewRetroactiveProcessor(pStore, embedPlugin, plugin.DigestEmbed)
 		retroProcessor.Start(ctx)
+		// Wire engine → processor: each successful Write notifies the embed worker.
+		eng.SetOnWrite(retroProcessor.Notify)
 		slog.Info("retroactive embed processor started")
 	}
 

@@ -31,7 +31,7 @@ curl -sX POST http://localhost:8475/api/engrams \
 # 4. Ask what is relevant RIGHT NOW
 curl -sX POST http://localhost:8475/api/activate \
   -H 'Content-Type: application/json' \
-  -d '{"context":"debugging the payment retry logic"}'
+  -d '{"context":["debugging the payment retry logic"]}'
 ```
 
 That Q3 incident surfaces. You never mentioned it. MuninnDB connected the concepts.
@@ -159,7 +159,7 @@ curl -sX POST http://localhost:8475/api/engrams \
 # Activate by context (returns ranked, decayed, associated memories)
 curl -sX POST http://localhost:8475/api/activate \
   -H 'Content-Type: application/json' \
-  -d '{"context": "reviewing the login flow for the mobile app", "max_results": 5}'
+  -d '{"context": ["reviewing the login flow for the mobile app"], "max_results": 5}'
 
 # Search by text
 curl 'http://localhost:8475/api/engrams?q=JWT&vault=default'
@@ -210,7 +210,7 @@ When you're ready to customize:
 
 | What | How |
 |------|-----|
-| Embedder: bundled (default) | `MUNINN_LOCAL_EMBED=1` or set in `muninn init` |
+| Embedder: bundled (default) | On automatically — set `MUNINN_LOCAL_EMBED=0` to disable |
 | Embedder: Ollama | `MUNINN_OLLAMA_URL=ollama://localhost:11434/nomic-embed-text` |
 | Embedder: OpenAI | `MUNINN_OPENAI_KEY=sk-...` |
 | Embedder: Voyage | `MUNINN_VOYAGE_KEY=pa-...` |
@@ -225,7 +225,6 @@ docker run -d \
   --name muninndb \
   -p 8474:8474 -p 8475:8475 -p 8476:8476 -p 8750:8750 \
   -v muninndb-data:/data \
-  -e MUNINN_LOCAL_EMBED=1 \
   ghcr.io/scrypster/muninndb:latest
 ```
 

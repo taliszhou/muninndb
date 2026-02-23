@@ -28,7 +28,6 @@ docker run -d \
   --name muninndb \
   -p 8474:8474 -p 8475:8475 -p 8476:8476 -p 8477:8477 -p 8750:8750 \
   -v muninndb-data:/data \
-  -e MUNINN_LOCAL_EMBED=1 \
   ghcr.io/scrypster/muninndb:latest
 ```
 
@@ -103,7 +102,7 @@ You'll get back an engram ID. That memory now exists in MuninnDB with a decay sc
 curl -sX POST http://localhost:8475/api/activate \
   -H 'Content-Type: application/json' \
   -d '{
-    "context": "debugging the payment retry logic",
+    "context": ["debugging the payment retry logic"],
     "max_results": 5
   }' | jq .
 ```
@@ -139,7 +138,7 @@ The bundled local embedder (all-MiniLM-L6-v2, 384-dim) is included and works off
 
 | Embedder | Config | Notes |
 |----------|--------|-------|
-| Local (bundled) | `MUNINN_LOCAL_EMBED=1` | Default. Offline. ~80MB. |
+| Local (bundled) | On by default — no config needed | Offline. ~80MB. Opt out with `MUNINN_LOCAL_EMBED=0`. |
 | Ollama | `MUNINN_OLLAMA_URL=ollama://localhost:11434/nomic-embed-text` | Self-hosted. |
 | OpenAI | `MUNINN_OPENAI_KEY=sk-...` | `text-embedding-3-small` by default. |
 | Voyage | `MUNINN_VOYAGE_KEY=pa-...` | High-quality, voyage-3 model. |

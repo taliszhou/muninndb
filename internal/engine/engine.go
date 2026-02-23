@@ -66,6 +66,11 @@ type Engine struct {
 	coordinator   CognitiveForwarder
 	coordinatorID string // this node's ID, used as OriginNodeID in CognitiveSideEffect
 
+	// onWrite is an optional callback invoked after every successful Write.
+	// Used to notify background processors (e.g. embed retroactive worker) of new data.
+	// Stored as atomic.Value to allow safe concurrent reads without a mutex.
+	onWrite atomic.Value // stores func()
+
 	// queryCounter generates fast query IDs without crypto/rand syscall overhead.
 	queryCounter atomic.Uint64
 	// stopOnce ensures Stop() is idempotent even if called multiple times.
@@ -77,6 +82,13 @@ type Engine struct {
 	stopCtx      context.Context    // cancelled on Stop() to signal goroutines
 	stopCancel   context.CancelFunc
 	hnswRegistry *hnsw.Registry     // per-vault HNSW indexes (shared with activation)
+}
+
+// SetOnWrite registers a callback invoked after every successful Write.
+// Intended for wiring background processors that need to react to new data.
+// Safe to call concurrently with Write.
+func (e *Engine) SetOnWrite(fn func()) {
+	e.onWrite.Store(fn)
 }
 
 // fastQueryID returns a unique query identifier without crypto/rand overhead.
@@ -512,6 +524,11 @@ func (e *Engine) Write(ctx context.Context, req *mbp.WriteRequest) (*mbp.WriteRe
 			engCopy.Embedding = append([]float32(nil), eng.Embedding...)
 		}
 		e.triggers.NotifyWrite(vaultID, &engCopy, true)
+	}
+
+	// Notify background processors (e.g. embed worker) of the new engram.
+	if fn, ok := e.onWrite.Load().(func()); ok && fn != nil {
+		fn()
 	}
 
 	return &mbp.WriteResponse{
