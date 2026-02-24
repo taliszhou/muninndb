@@ -404,6 +404,9 @@ func (s *Server) handleCreateEngram(w http.ResponseWriter, r *http.Request) {
 		s.sendError(w, http.StatusBadRequest, ErrInvalidEngram, "invalid request body")
 		return
 	}
+	if req.Vault == "" {
+		req.Vault = ctxVault(r)
+	}
 	resp, err := s.engine.Write(r.Context(), &req)
 	if err != nil {
 		s.sendError(w, http.StatusInternalServerError, ErrStorageError, err.Error())
@@ -418,7 +421,7 @@ func (s *Server) handleGetEngram(w http.ResponseWriter, r *http.Request) {
 		s.sendError(w, http.StatusBadRequest, ErrInvalidEngram, "missing engram id")
 		return
 	}
-	resp, err := s.engine.Read(r.Context(), &ReadRequest{ID: id})
+	resp, err := s.engine.Read(r.Context(), &ReadRequest{ID: id, Vault: ctxVault(r)})
 	if err != nil {
 		s.sendError(w, http.StatusNotFound, ErrEngramNotFound, err.Error())
 		return
@@ -432,7 +435,7 @@ func (s *Server) handleDeleteEngram(w http.ResponseWriter, r *http.Request) {
 		s.sendError(w, http.StatusBadRequest, ErrInvalidEngram, "missing engram id")
 		return
 	}
-	resp, err := s.engine.Forget(r.Context(), &ForgetRequest{ID: id})
+	resp, err := s.engine.Forget(r.Context(), &ForgetRequest{ID: id, Vault: ctxVault(r)})
 	if err != nil {
 		s.sendError(w, http.StatusInternalServerError, ErrStorageError, err.Error())
 		return
@@ -445,6 +448,9 @@ func (s *Server) handleActivate(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.sendError(w, http.StatusBadRequest, ErrInvalidEngram, "invalid request body")
 		return
+	}
+	if req.Vault == "" {
+		req.Vault = ctxVault(r)
 	}
 	resp, err := s.engine.Activate(r.Context(), &req)
 	if err != nil {
@@ -459,6 +465,9 @@ func (s *Server) handleLink(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.sendError(w, http.StatusBadRequest, ErrInvalidEngram, "invalid request body")
 		return
+	}
+	if req.Vault == "" {
+		req.Vault = ctxVault(r)
 	}
 	mbpReq := &mbp.LinkRequest{
 		SourceID: req.SourceID,
@@ -497,6 +506,16 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ReadyResponse{Status: "ready"})
+}
+
+// ctxVault returns the vault name resolved by the auth middleware for this request.
+// The middleware always sets a non-empty vault in context (defaulting to "default");
+// this helper ensures handlers never pass an empty vault name to the engine.
+func ctxVault(r *http.Request) string {
+	if v, ok := r.Context().Value(auth.ContextVault).(string); ok && v != "" {
+		return v
+	}
+	return "default"
 }
 
 // Utility methods
