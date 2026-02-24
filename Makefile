@@ -1,5 +1,7 @@
 ASSETS_DIR := internal/plugin/embed/assets
 ORT_VERSION := 1.24.2
+# ORT dropped Intel Mac support after v1.23.2; pin darwin/amd64 to the last working version.
+ORT_VERSION_DARWIN_AMD64 := 1.23.2
 MODEL_REPO  := Xenova/all-MiniLM-L6-v2
 HF_BASE     := https://huggingface.co/$(MODEL_REPO)/resolve/main
 ORT_BASE    := https://github.com/microsoft/onnxruntime/releases/download/v$(ORT_VERSION)
@@ -46,13 +48,13 @@ _ort-darwin-arm64:
 	@echo "    darwin/arm64: $$(du -sh $(ASSETS_DIR)/libonnxruntime_darwin_arm64.dylib | cut -f1)"
 
 _ort-darwin-amd64:
-	@echo "    Fetching darwin/amd64..."
+	@echo "    Fetching darwin/amd64 (ORT $(ORT_VERSION_DARWIN_AMD64) — last release with Intel Mac support)..."
 	@curl -fL --progress-bar \
-		"$(ORT_BASE)/onnxruntime-osx-x86_64-$(ORT_VERSION).tgz" \
+		"https://github.com/microsoft/onnxruntime/releases/download/v$(ORT_VERSION_DARWIN_AMD64)/onnxruntime-osx-x86_64-$(ORT_VERSION_DARWIN_AMD64).tgz" \
 		-o "/tmp/ort-osx-amd64.tgz"
-	@tar -xzf /tmp/ort-osx-amd64.tgz -C /tmp onnxruntime-osx-x86_64-$(ORT_VERSION)/lib/libonnxruntime.dylib 2>/dev/null || \
+	@tar -xzf /tmp/ort-osx-amd64.tgz -C /tmp onnxruntime-osx-x86_64-$(ORT_VERSION_DARWIN_AMD64)/lib/libonnxruntime.dylib 2>/dev/null || \
 		tar -xzf /tmp/ort-osx-amd64.tgz -C /tmp --strip-components=2 --wildcards '*/lib/libonnxruntime.dylib'
-	@cp /tmp/onnxruntime-osx-x86_64-$(ORT_VERSION)/lib/libonnxruntime.dylib $(ASSETS_DIR)/libonnxruntime_darwin_amd64.dylib 2>/dev/null || \
+	@cp /tmp/onnxruntime-osx-x86_64-$(ORT_VERSION_DARWIN_AMD64)/lib/libonnxruntime.dylib $(ASSETS_DIR)/libonnxruntime_darwin_amd64.dylib 2>/dev/null || \
 		cp /tmp/libonnxruntime.dylib $(ASSETS_DIR)/libonnxruntime_darwin_amd64.dylib
 	@echo "    darwin/amd64: $$(du -sh $(ASSETS_DIR)/libonnxruntime_darwin_amd64.dylib | cut -f1)"
 

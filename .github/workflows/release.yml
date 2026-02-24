@@ -28,7 +28,7 @@ jobs:
             goos: darwin
             goarch: amd64
             ort_target: _ort-darwin-amd64
-            cache_key: embed-assets-ort-1.24.2-minilm-v2-darwin-amd64
+            cache_key: embed-assets-ort-1.23.2-minilm-v2-darwin-amd64
             cc: "clang -arch x86_64"
 
           - runner: ubuntu-latest    # Linux x86-64
