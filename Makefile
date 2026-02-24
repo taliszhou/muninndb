@@ -1,5 +1,5 @@
 ASSETS_DIR := internal/plugin/embed/assets
-ORT_VERSION := 1.24.1
+ORT_VERSION := 1.24.2
 MODEL_REPO  := Xenova/all-MiniLM-L6-v2
 HF_BASE     := https://huggingface.co/$(MODEL_REPO)/resolve/main
 ORT_BASE    := https://github.com/microsoft/onnxruntime/releases/download/v$(ORT_VERSION)

@@ -27,7 +27,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: internal/plugin/embed/assets
-          key: embed-assets-ort-1.24.1-minilm-v2-linux
+          key: embed-assets-ort-1.24.2-minilm-v2-linux
 
       # Only fetch if the cache missed — saves ~2 min and 130MB on cache hits.
       - name: Fetch embed assets (linux/amd64 only)
@@ -58,7 +58,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: internal/plugin/embed/assets
-          key: embed-assets-ort-1.24.1-minilm-v2-linux
+          key: embed-assets-ort-1.24.2-minilm-v2-linux
 
       # Fetch if cache missed (e.g. first run after cache key changes)
       - name: Fetch embed assets if needed
@@ -90,7 +90,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: internal/plugin/embed/assets
-          key: embed-assets-ort-1.24.1-minilm-v2-linux
+          key: embed-assets-ort-1.24.2-minilm-v2-linux
 
       # Fetch if cache missed (e.g. first run after cache key changes)
       - name: Fetch embed assets if needed

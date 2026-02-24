@@ -21,19 +21,22 @@ jobs:
             goos: darwin
             goarch: arm64
             ort_target: _ort-darwin-arm64
-            cache_key: embed-assets-ort-1.24.1-minilm-v2-darwin-arm64
+            cache_key: embed-assets-ort-1.24.2-minilm-v2-darwin-arm64
+            cc: ""
 
-          - runner: macos-13         # Intel Mac
+          - runner: macos-14         # Cross-compile Intel from arm64 runner
             goos: darwin
             goarch: amd64
             ort_target: _ort-darwin-amd64
-            cache_key: embed-assets-ort-1.24.1-minilm-v2-darwin-amd64
+            cache_key: embed-assets-ort-1.24.2-minilm-v2-darwin-amd64
+            cc: "clang -arch x86_64"
 
           - runner: ubuntu-latest    # Linux x86-64
             goos: linux
             goarch: amd64
             ort_target: _ort-linux-amd64
-            cache_key: embed-assets-ort-1.24.1-minilm-v2-linux-amd64
+            cache_key: embed-assets-ort-1.24.2-minilm-v2-linux-amd64
+            cc: ""
 
     steps:
       - uses: actions/checkout@v4
@@ -58,6 +61,11 @@ jobs:
         run: make fetch-model ${{ matrix.ort_target }}
 
       - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "1"
+          CC: ${{ matrix.cc }}
         run: |
           go build \
             -ldflags "-X main.version=${GITHUB_REF_NAME}" \
