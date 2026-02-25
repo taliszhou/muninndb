@@ -139,8 +139,9 @@ jobs:
           $dataDir = "$env:TEMP\muninn-ci-data"
 
           # Start daemon
-          Start-Process -FilePath ".\muninn.exe" -ArgumentList "--daemon","--data",$dataDir -NoNewWindow -PassThru | ForEach-Object { $_.Id } | Set-Variable pid
-          Write-Host "Started muninn (PID: $pid)"
+          $proc = Start-Process -FilePath ".\muninn.exe" -ArgumentList "--daemon","--data",$dataDir -NoNewWindow -PassThru
+          $srvPid = $proc.Id
+          Write-Host "Started muninn (PID: $srvPid)"
 
           # Wait for health
           $ready = $false
@@ -167,7 +168,7 @@ jobs:
           Write-Host "Health response: $($health | ConvertTo-Json -Compress)"
 
           # Stop
-          Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+          Stop-Process -Id $srvPid -Force -ErrorAction SilentlyContinue
           Write-Host "Stopped muninn"
         shell: pwsh
 

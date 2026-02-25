@@ -381,23 +381,26 @@ func TestMCPTemporalFilter(t *testing.T) {
 	ago3 := now.Add(-3 * 24 * time.Hour).Format(time.RFC3339)
 	ago7 := now.Add(-7 * 24 * time.Hour).Format(time.RFC3339)
 
+	// Use a unique marker so FTS can reliably find these memories.
+	marker := fmt.Sprintf("temporal_test_%d", time.Now().UnixNano())
+
 	// Write 3 memories with controlled timestamps.
 	r1 := mcpTool(t, token, "muninn_remember", map[string]any{
 		"vault":      "default",
-		"concept":    "ancient event",
-		"content":    "something that happened long ago",
+		"concept":    "ancient " + marker,
+		"content":    marker + " something that happened long ago",
 		"created_at": ago30,
 	})
 	r2 := mcpTool(t, token, "muninn_remember", map[string]any{
 		"vault":      "default",
-		"concept":    "recent event",
-		"content":    "something that happened recently",
+		"concept":    "recent " + marker,
+		"content":    marker + " something that happened recently",
 		"created_at": ago3,
 	})
 	r3 := mcpTool(t, token, "muninn_remember", map[string]any{
 		"vault":   "default",
-		"concept": "current event",
-		"content": "something happening now",
+		"concept": "current " + marker,
+		"content": marker + " something happening now",
 	})
 
 	id1, _ := r1["id"].(string)
@@ -408,18 +411,21 @@ func TestMCPTemporalFilter(t *testing.T) {
 	}
 
 	// Wait for all 3 memories to be indexed before testing temporal queries.
-	waitForIDs(t, token, map[string]any{
-		"vault":   "default",
-		"context": []string{"event"},
-		"limit":   20,
-	}, []string{id1, id2, id3}, 10*time.Second)
+	recallArgs := map[string]any{
+		"vault":     "default",
+		"context":   []string{marker},
+		"limit":     20,
+		"threshold": 0.0,
+	}
+	waitForIDs(t, token, recallArgs, []string{id1, id2, id3}, 15*time.Second)
 
 	// since=7d ago: should return recent (3d) + current, NOT ancient (30d).
 	result := mcpTool(t, token, "muninn_recall", map[string]any{
-		"vault":   "default",
-		"context": []string{"event"},
-		"since":   ago7,
-		"limit":   20,
+		"vault":     "default",
+		"context":   []string{marker},
+		"since":     ago7,
+		"limit":     20,
+		"threshold": 0.0,
 	})
 	ids := extractIDs(result)
 	if !ids[id2] {
@@ -434,10 +440,11 @@ func TestMCPTemporalFilter(t *testing.T) {
 
 	// before=7d ago: should return ancient only.
 	result2 := mcpTool(t, token, "muninn_recall", map[string]any{
-		"vault":   "default",
-		"context": []string{"event"},
-		"before":  ago7,
-		"limit":   20,
+		"vault":     "default",
+		"context":   []string{marker},
+		"before":    ago7,
+		"limit":     20,
+		"threshold": 0.0,
 	})
 	ids2 := extractIDs(result2)
 	if !ids2[id1] {
