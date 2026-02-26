@@ -10,6 +10,7 @@ document.addEventListener('alpine:init', () => {
     vaults: ['default'],
     isDarkMode: localStorage.getItem('muninnTheme') !== 'light',
     liveConnected: false,
+    appVersion: '',
 
     // Dashboard
     stats: { engramCount: 0, vaultCount: 0, storageBytes: 0, indexSize: 0 },
@@ -197,6 +198,12 @@ document.addEventListener('alpine:init', () => {
       };
       window.addEventListener('hashchange', onHash);
       onHash();
+
+      // Fetch version from public health endpoint
+      try {
+        const h = await fetch('/api/health').then(r => r.json());
+        this.appVersion = h.version || '';
+      } catch (_) {}
 
       // Load initial data (gated on auth check)
       await this.checkAuth();
