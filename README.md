@@ -352,7 +352,9 @@ docker run -d \
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). PRs welcome. For large changes, open an issue first.
+PRs welcome. For large changes, open an issue first.
+
+By submitting a pull request, you agree to the [Contributor License Agreement](CLA.md).
 
 Ports at a glance: `8474` MBP · `8475` REST · `8476` Web UI · `8477` gRPC · `8750` MCP
 
