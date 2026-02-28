@@ -481,6 +481,28 @@ func (ps *PebbleStore) FlagContradiction(ctx context.Context, wsPrefix [8]byte, 
 	return nil
 }
 
+// ResolveContradiction deletes the contradiction marker(s) for the pair (a,b).
+// Contradictions are stored bidirectionally, so both directions are removed.
+func (ps *PebbleStore) ResolveContradiction(ctx context.Context, wsPrefix [8]byte, a, b ULID) error {
+	batch := ps.db.NewBatch()
+	defer batch.Close()
+
+	var aBytes [16]byte = [16]byte(a)
+	var bBytes [16]byte = [16]byte(b)
+
+	// Delete both directions regardless of canonical ordering — the caller may pass
+	// (a,b) or (b,a) so we always remove the marker written for each direction.
+	contraKeyAB := keys.ContradictionKey(wsPrefix, 0, 0, aBytes)
+	contraKeyBA := keys.ContradictionKey(wsPrefix, 0, 0, bBytes)
+	batch.Delete(contraKeyAB, nil)
+	batch.Delete(contraKeyBA, nil)
+
+	if err := batch.Commit(pebble.NoSync); err != nil {
+		return fmt.Errorf("resolve contradiction: %w", err)
+	}
+	return nil
+}
+
 // GetContradictions returns all contradiction pairs in the vault by scanning the 0x0A prefix.
 // The key structure is: 0x0A | wsPrefix(8) | conceptHash(4) | relType(2) | id(16) = 31 bytes.
 // The value is the partner ULID (16 bytes).

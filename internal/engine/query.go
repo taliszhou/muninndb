@@ -54,6 +54,27 @@ func (e *Engine) GetContradictions(ctx context.Context, vault string) ([][2]stor
 	return e.store.GetContradictions(ctx, ws)
 }
 
+// ResolveContradiction removes the contradiction marker for the pair (idA, idB)
+// and updates the vault coherence counters.
+func (e *Engine) ResolveContradiction(ctx context.Context, vault, idA, idB string) error {
+	a, err := storage.ParseULID(idA)
+	if err != nil {
+		return fmt.Errorf("parse id_a: %w", err)
+	}
+	b, err := storage.ParseULID(idB)
+	if err != nil {
+		return fmt.Errorf("parse id_b: %w", err)
+	}
+	ws := e.store.ResolveVaultPrefix(vault)
+	if err := e.store.ResolveContradiction(ctx, ws, a, b); err != nil {
+		return err
+	}
+	if e.coherence != nil {
+		e.coherence.GetOrCreate(vault).RecordContradictionResolved()
+	}
+	return nil
+}
+
 // Traverse performs a bounded BFS from startID, following association edges.
 func (e *Engine) Traverse(ctx context.Context, vault, startID string, maxHops, maxNodes int) ([]TraversalNode, []TraversalEdge, error) {
 	ws := e.store.ResolveVaultPrefix(vault)
