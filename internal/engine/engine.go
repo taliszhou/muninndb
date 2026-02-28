@@ -686,11 +686,11 @@ func (e *Engine) Write(ctx context.Context, req *mbp.WriteRequest) (*mbp.WriteRe
 
 	metrics.EngineWritesTotal.Inc()
 
+	d := time.Since(writeStart)
 	if e.latencyTracker != nil {
-		d := time.Since(writeStart)
 		e.latencyTracker.Record(wsPrefix, "write", d)
-		metrics.WriteDuration.WithLabelValues(vaultName).Observe(d.Seconds())
 	}
+	metrics.WriteDuration.WithLabelValues(vaultName).Observe(d.Seconds())
 
 	return &mbp.WriteResponse{
 		ID:        id.String(),
@@ -986,11 +986,11 @@ func (e *Engine) Read(ctx context.Context, req *mbp.ReadRequest) (*mbp.ReadRespo
 		return nil, fmt.Errorf("get engram: %w", err)
 	}
 
+	d := time.Since(readStart)
 	if e.latencyTracker != nil {
-		d := time.Since(readStart)
 		e.latencyTracker.Record(wsPrefix, "read", d)
-		metrics.ReadDuration.WithLabelValues(req.Vault).Observe(d.Seconds())
 	}
+	metrics.ReadDuration.WithLabelValues(req.Vault).Observe(d.Seconds())
 
 	return &mbp.ReadResponse{
 		ID:             eng.ID.String(),
@@ -1352,11 +1352,11 @@ func (e *Engine) activateCore(ctx context.Context, req *mbp.ActivateRequest, str
 		}
 	}
 
+	d := time.Since(activateStart)
 	if e.latencyTracker != nil {
-		d := time.Since(activateStart)
 		e.latencyTracker.Record(wsPrefix, "activate", d)
-		metrics.ActivateDuration.WithLabelValues(req.Vault).Observe(d.Seconds())
 	}
+	metrics.ActivateDuration.WithLabelValues(req.Vault).Observe(d.Seconds())
 
 	return &mbp.ActivateResponse{
 		QueryID:     e.fastQueryID(),
