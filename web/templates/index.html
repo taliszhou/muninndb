@@ -122,12 +122,16 @@
           <option :value="v" x-text="v"></option>
         </template>
       </select>
+      <!-- New Vault button (expanded only) -->
+      <button class="btn-ghost" style="font-size:0.75rem;padding:0.25rem 0.5rem;margin-top:0.25rem;width:100%;text-align:left;"
+        @click="createVault()" title="Create a new vault">+ New Vault</button>
 
       <!-- Live dot + theme toggle (always visible) -->
       <div class="sidebar-footer-row">
         <span class="ws-dot" :class="liveConnected ? 'connected' : 'disconnected'"
           :title="liveConnected ? 'Live connected' : 'Reconnecting...'"></span>
         <button class="btn-ghost" style="font-size:1.125rem;padding:0.25rem 0.375rem;line-height:1;" @click="toggleTheme()" title="Toggle theme">◐</button>
+        <button class="btn-ghost" style="font-size:0.8125rem;padding:0.25rem 0.375rem;line-height:1;opacity:0.6;" @click="showShortcutsHelp=true" title="Keyboard shortcuts (?)">?</button>
       </div>
 
       <!-- Version label -->
@@ -265,25 +269,52 @@
         </div>
       </div>
 
+      <!-- Memories sub-tab bar (Item 1) -->
+      <div style="display:flex;gap:0.25rem;margin-bottom:1.25rem;border-bottom:1px solid var(--border);">
+        <button @click="memoriesSubTab='list'"
+          :style="memoriesSubTab==='list' ? 'border-bottom:2px solid var(--accent);font-weight:600;opacity:1;' : 'opacity:0.6;'"
+          style="padding:0.5rem 1rem;font-size:0.875rem;background:none;border:none;cursor:pointer;color:var(--text-primary);transition:opacity 0.15s;">Memories</button>
+        <button @click="memoriesSubTab='contradictions'; loadContradictions()"
+          :style="memoriesSubTab==='contradictions' ? 'border-bottom:2px solid var(--accent);font-weight:600;opacity:1;' : 'opacity:0.6;'"
+          style="padding:0.5rem 1rem;font-size:0.875rem;background:none;border:none;cursor:pointer;color:var(--text-primary);transition:opacity 0.15s;display:flex;align-items:center;gap:0.5rem;">
+          Contradictions
+          <span x-show="contradictions.length > 0"
+            style="font-size:0.65rem;background:rgba(239,68,68,0.15);color:#ef4444;border-radius:9999px;padding:0.1rem 0.45rem;font-weight:700;"
+            x-text="contradictions.length"></span>
+        </button>
+      </div>
+
+      <!-- Memory list sub-tab -->
+      <div x-show="memoriesSubTab==='list'">
       <p style="color:var(--text-muted);font-size:0.8125rem;margin:0 0 1rem;">
         Memories are stored automatically by connected AI tools or any app using the SDK, and retrieved by semantic similarity.
         Search using natural language — try <em>"decisions about authentication"</em> or <em>"recent bugs"</em>.
       </p>
       <div style="display:flex;gap:1rem;margin-bottom:1.5rem;align-items:center;flex-wrap:wrap;">
-        <input class="input-field" placeholder="Search memories… (semantic, try natural language)" x-model="searchQuery"
+        <input id="memory-search-input" class="input-field" placeholder="Search memories… (semantic, try natural language)" x-model="searchQuery"
           @keydown.enter="searchMemories()" style="flex:1;min-width:200px;" />
-        <!-- Recall mode segmented control -->
+        <!-- Recall mode segmented control (Item 3: tooltips) -->
         <div style="display:inline-flex;border:1px solid var(--border);border-radius:0.375rem;overflow:hidden;font-size:0.75rem;">
-          <template x-for="m in ['balanced','semantic','recent','deep']" :key="m">
-            <button @click="searchMode = m"
-              :style="searchMode === m ? 'background:var(--accent);color:#fff;' : 'background:var(--bg-elevated);color:var(--text-secondary);'"
-              style="padding:0.25rem 0.625rem;border:none;cursor:pointer;text-transform:capitalize;transition:all 0.15s;"
-              x-text="m"></button>
-          </template>
+          <button @click="searchMode = 'balanced'"
+            :style="searchMode === 'balanced' ? 'background:var(--accent);color:#fff;' : 'background:var(--bg-elevated);color:var(--text-secondary);'"
+            style="padding:0.25rem 0.625rem;border:none;cursor:pointer;transition:all 0.15s;"
+            title="Blend keyword + semantic search with temporal decay (default)">Balanced</button>
+          <button @click="searchMode = 'semantic'"
+            :style="searchMode === 'semantic' ? 'background:var(--accent);color:#fff;' : 'background:var(--bg-elevated);color:var(--text-secondary);'"
+            style="padding:0.25rem 0.625rem;border:none;cursor:pointer;transition:all 0.15s;"
+            title="Pure vector similarity — best for concept matching">Semantic</button>
+          <button @click="searchMode = 'recent'"
+            :style="searchMode === 'recent' ? 'background:var(--accent);color:#fff;' : 'background:var(--bg-elevated);color:var(--text-secondary);'"
+            style="padding:0.25rem 0.625rem;border:none;cursor:pointer;transition:all 0.15s;"
+            title="Prioritize recently created memories">Recent</button>
+          <button @click="searchMode = 'deep'"
+            :style="searchMode === 'deep' ? 'background:var(--accent);color:#fff;' : 'background:var(--bg-elevated);color:var(--text-secondary);'"
+            style="padding:0.25rem 0.625rem;border:none;cursor:pointer;transition:all 0.15s;"
+            title="Exhaustive graph traversal — slower but finds distant connections">Deep</button>
         </div>
         <button class="btn-primary" @click="searchMemories()">Search</button>
         <button class="btn-secondary" @click="page=0;searchQuery='';loadMemories()">Browse All</button>
-        <button class="btn-primary" @click="showNewMemoryModal=true">+ New Memory</button>
+        <button class="btn-primary" @click="showNewMemoryModal=true" title="New memory (n)">+ New Memory</button>
       </div>
 
       <!-- Memory list -->
@@ -327,6 +358,48 @@
         <button class="btn-secondary" :disabled="(page+1)*20>=totalMemories" @click="page++;loadMemories()">Next →</button>
       </div>
 
+      </div><!-- /memoriesSubTab list -->
+
+      <!-- Contradictions sub-tab (Item 1) -->
+      <div x-show="memoriesSubTab='contradictions'">
+        <p style="color:var(--text-muted);font-size:0.8125rem;margin:0 0 1.25rem;">
+          Memory pairs flagged as potentially contradictory by the Contradiction Detection worker.
+          Click <strong>View</strong> to inspect each memory in detail.
+        </p>
+        <div x-show="!contradictionsLoaded" style="color:var(--text-muted);text-align:center;padding:3rem;">Loading…</div>
+        <div x-show="contradictionsLoaded && contradictions.length === 0" style="color:var(--text-muted);text-align:center;padding:3rem;">
+          No contradictions detected in vault <strong x-text="vault"></strong>.<br>
+          <span style="font-size:0.8125rem;">The contradiction worker will flag pairs that conflict with each other.</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:0.75rem;">
+          <template x-for="(pair, idx) in contradictions" :key="idx">
+            <div style="background:var(--bg-elevated);border:1px solid rgba(239,68,68,0.3);border-radius:0.5rem;padding:1rem;">
+              <div style="font-size:0.75rem;color:#ef4444;font-weight:600;margin-bottom:0.75rem;text-transform:uppercase;letter-spacing:0.05em;">Contradiction</div>
+              <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:1rem;align-items:start;">
+                <div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:0.375rem;padding:0.75rem;">
+                  <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.375rem;">Memory A</div>
+                  <div style="font-weight:600;font-size:0.875rem;margin-bottom:0.5rem;" x-text="pair.concept_a || pair.id_a.slice(0,8)"></div>
+                  <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.5rem;font-family:monospace;" x-text="pair.id_a.slice(0,12) + '…'"></div>
+                  <button class="btn-secondary" style="font-size:0.75rem;padding:0.25rem 0.625rem;"
+                    @click="openMemory({id:pair.id_a, concept:pair.concept_a, content:'', vault:vault}); memoriesSubTab='list'">View</button>
+                </div>
+                <div style="color:rgba(239,68,68,0.7);font-size:1.25rem;font-weight:700;align-self:center;">⟷</div>
+                <div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:0.375rem;padding:0.75rem;">
+                  <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.375rem;">Memory B</div>
+                  <div style="font-weight:600;font-size:0.875rem;margin-bottom:0.5rem;" x-text="pair.concept_b || pair.id_b.slice(0,8)"></div>
+                  <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.5rem;font-family:monospace;" x-text="pair.id_b.slice(0,12) + '…'"></div>
+                  <button class="btn-secondary" style="font-size:0.75rem;padding:0.25rem 0.625rem;"
+                    @click="openMemory({id:pair.id_b, concept:pair.concept_b, content:'', vault:vault}); memoriesSubTab='list'">View</button>
+                </div>
+              </div>
+              <div x-show="pair.detected_at" style="font-size:0.75rem;color:var(--text-muted);margin-top:0.625rem;">
+                Detected: <span x-text="pair.detected_at ? new Date(pair.detected_at * 1000).toLocaleString() : ''"></span>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div><!-- /memoriesSubTab contradictions -->
+
       <!-- Detail panel (slide-in) -->
       <div x-show="selectedMemory !== null"
         style="position:fixed;right:0;top:0;height:100vh;width:400px;background:var(--bg-surface);border-left:1px solid var(--border);padding:1.5rem;overflow-y:auto;z-index:40;"
@@ -336,15 +409,54 @@
         x-transition:leave="transition ease-in duration-150"
         x-transition:leave-start="transform translate-x-0"
         x-transition:leave-end="transform translate-x-full">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;">
-          <h2 style="margin:0;font-size:1.125rem;" x-text="selectedMemory ? (selectedMemory.concept || 'Memory Detail') : ''"></h2>
-          <button class="btn-ghost" @click="selectedMemory=null">✕</button>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+          <!-- Item 7: Prev/Next navigation -->
+          <div style="display:flex;align-items:center;gap:0.375rem;flex:1;min-width:0;">
+            <button class="btn-ghost" style="padding:0.2rem 0.45rem;font-size:0.9rem;"
+              @click="navigateMemory(-1)"
+              :disabled="selectedMemoryIndex() <= 0"
+              :style="selectedMemoryIndex() <= 0 ? 'opacity:0.3;cursor:not-allowed;' : ''"
+              title="Previous memory">&lsaquo;</button>
+            <h2 style="margin:0;font-size:1.125rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+              x-text="selectedMemory ? (selectedMemory.concept || 'Memory Detail') : ''"></h2>
+            <button class="btn-ghost" style="padding:0.2rem 0.45rem;font-size:0.9rem;"
+              @click="navigateMemory(1)"
+              :disabled="selectedMemoryIndex() >= memories.length - 1"
+              :style="selectedMemoryIndex() >= memories.length - 1 ? 'opacity:0.3;cursor:not-allowed;' : ''"
+              title="Next memory">&rsaquo;</button>
+          </div>
+          <button class="btn-ghost" @click="selectedMemory=null" style="flex-shrink:0;">✕</button>
+        </div>
+        <!-- Action buttons row -->
+        <div x-show="selectedMemory && !editingMemory" style="display:flex;gap:0.5rem;margin-bottom:1rem;">
+          <button class="btn-ghost" style="font-size:0.8125rem;padding:0.25rem 0.625rem;" @click="startEditMemory()">Edit</button>
+          <button class="btn-ghost" style="font-size:0.8125rem;padding:0.25rem 0.625rem;" @click="openLinkModal(selectedMemory.id)">Link</button>
         </div>
         <template x-if="selectedMemory">
           <div>
             <div class="form-group" style="margin-bottom:1rem;">
               <label>Content</label>
-              <p style="color:var(--text-primary);line-height:1.6;white-space:pre-wrap;" x-text="selectedMemory.content"></p>
+              <!-- Read-only view -->
+              <p x-show="!editingMemory" style="color:var(--text-primary);line-height:1.6;white-space:pre-wrap;" x-text="selectedMemory.content"></p>
+              <!-- Edit mode -->
+              <template x-if="editingMemory">
+                <div>
+                  <textarea class="input-field" style="width:100%;min-height:120px;margin-top:0.375rem;resize:vertical;"
+                    x-model="editMemoryForm.content"></textarea>
+                  <label style="margin-top:0.625rem;display:block;">Reason for change *</label>
+                  <input class="input-field" style="margin-top:0.375rem;" type="text" placeholder="Why is this being updated?"
+                    x-model="editMemoryForm.reason" />
+                  <div style="display:flex;gap:0.5rem;margin-top:0.75rem;">
+                    <button class="btn-primary" style="font-size:0.8125rem;"
+                      :disabled="editMemorySaving"
+                      @click="saveEditMemory()">
+                      <span x-show="!editMemorySaving">Save</span>
+                      <span x-show="editMemorySaving">Saving…</span>
+                    </button>
+                    <button class="btn-ghost" style="font-size:0.8125rem;" @click="cancelEditMemory()">Cancel</button>
+                  </div>
+                </div>
+              </template>
             </div>
             <div class="form-group" style="margin-bottom:1rem;">
               <label>Vault</label>
@@ -472,7 +584,7 @@
               </div>
               <div class="stat-card">
                 <div class="stat-value" x-text="obs.storage.pebble.read_amp"></div>
-                <div class="stat-label">Read Amp</div>
+                <div class="stat-label" title="Ratio of disk reads to logical reads — lower is better">Read Amp</div>
               </div>
               <div class="stat-card">
                 <div class="stat-value" x-text="formatBytes(obs.storage.pebble.mem_table_bytes)"></div>
@@ -570,7 +682,7 @@
                   <template x-if="v.coherence">
                     <div>
                       <div style="font-size:1rem;font-weight:600;color:var(--text-primary);" x-text="(v.coherence.score * 100).toFixed(0) + '%'"></div>
-                      <div style="font-size:0.6875rem;color:var(--text-muted);">Coherence</div>
+                      <div style="font-size:0.6875rem;color:var(--text-muted);" title="0-1 measure of memory graph health (orphans, contradictions, duplication)">Coherence</div>
                     </div>
                   </template>
                 </div>
@@ -655,6 +767,19 @@
             <button type="submit" class="btn-primary">Update Password</button>
           </form>
         </div>
+
+        <!-- Backup card (Item 5) -->
+        <div class="card-polished" style="max-width:480px;margin-top:1.25rem;">
+          <h3 style="margin:0 0 0.75rem;font-size:1rem;">Database Backup</h3>
+          <p style="color:var(--text-muted);font-size:0.8125rem;margin:0 0 1rem;">
+            Create a point-in-time backup of the database using Pebble's checkpoint.
+            Safe to run on a live server. The backup is written to <code>./backups/</code> relative to the server working directory.
+          </p>
+          <button class="btn-primary" @click="triggerBackup()" :disabled="backupLoading"
+            :style="backupLoading ? 'opacity:0.6;cursor:not-allowed;' : ''">
+            <span x-text="backupLoading ? 'Backing up…' : 'Backup Now'"></span>
+          </button>
+        </div>
       </div>
 
       <!-- ── API Keys tab ───────────────────────────────────────────── -->
@@ -716,6 +841,7 @@
                   <th style="padding:0.5rem 0.75rem 0.5rem 0;color:var(--text-muted);font-weight:500;">Label</th>
                   <th style="padding:0.5rem 0.75rem;color:var(--text-muted);font-weight:500;">Vault</th>
                   <th style="padding:0.5rem 0.75rem;color:var(--text-muted);font-weight:500;">Mode</th>
+                  <th style="padding:0.5rem 0.75rem;color:var(--text-muted);font-weight:500;" title="Expiry date for this API key">Expires</th>
                   <th style="padding:0.5rem 0;color:var(--text-muted);font-weight:500;text-align:right;">Action</th>
                 </tr>
               </thead>
@@ -727,6 +853,9 @@
                     <td style="padding:0.625rem 0.75rem;">
                       <span :class="key.mode==='full' ? 'badge-info' : 'badge-warning'" x-text="key.mode"></span>
                     </td>
+                    <td style="padding:0.625rem 0.75rem;color:var(--text-secondary);font-size:0.8125rem;"
+                      :title="key.expires_at ? 'Expires: ' + new Date(key.expires_at).toLocaleString() : 'This key never expires'"
+                      x-text="formatKeyExpiry(key.expires_at)"></td>
                     <td style="padding:0.625rem 0;text-align:right;">
                       <button class="btn-danger" style="font-size:0.75rem;padding:0.25rem 0.625rem;" @click="revokeApiKey(key.id)">Revoke</button>
                     </td>
@@ -754,6 +883,7 @@
               <label>Vault Name</label>
               <input class="input-field" :value="vault" readonly style="opacity:0.6;cursor:not-allowed;" />
             </div>
+            <button class="btn-ghost" style="font-size:0.8125rem;margin-top:0.75rem;width:100%;" @click="createVault()">+ New Vault</button>
           </div>
 
           <!-- Semantic Search card -->
@@ -934,23 +1064,23 @@
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;">
                   <div class="form-group">
-                    <label style="font-size:0.75rem;">BFS Hop Depth (0–8)</label>
+                    <label style="font-size:0.75rem;" title="How many association edges to traverse during recall (0-8)">BFS Hop Depth (0–8)</label>
                     <input class="input-field" type="number" min="0" max="8" x-model.number="plasticityForm.hopDepth" placeholder="preset" @input="$nextTick(() => _updatePlasticityChart())" />
                   </div>
                   <div class="form-group">
-                    <label style="font-size:0.75rem;">Semantic Weight (0–1)</label>
+                    <label style="font-size:0.75rem;" title="Influence of vector similarity in scoring (0-1)">Semantic Weight (0–1)</label>
                     <input class="input-field" type="number" step="0.01" min="0" max="1" x-model.number="plasticityForm.semanticWeight" placeholder="preset" @input="$nextTick(() => _updatePlasticityChart())" />
                   </div>
                   <div class="form-group">
-                    <label style="font-size:0.75rem;">FTS Weight (0–1)</label>
+                    <label style="font-size:0.75rem;" title="Influence of keyword matching in scoring (0-1)">FTS Weight (0–1)</label>
                     <input class="input-field" type="number" step="0.01" min="0" max="1" x-model.number="plasticityForm.ftsWeight" placeholder="preset" @input="$nextTick(() => _updatePlasticityChart())" />
                   </div>
                   <div class="form-group">
-                    <label style="font-size:0.75rem;">Relevance Floor (0–1)</label>
+                    <label style="font-size:0.75rem;" title="Minimum score threshold to include a memory in results">Relevance Floor (0–1)</label>
                     <input class="input-field" type="number" step="0.01" min="0" max="1" x-model.number="plasticityForm.relevanceFloor" placeholder="preset" @input="$nextTick(() => _updatePlasticityChart())" />
                   </div>
                   <div class="form-group">
-                    <label style="font-size:0.75rem;">Temporal Halflife (days)</label>
+                    <label style="font-size:0.75rem;" title="Days until memory relevance decays to 50%">Temporal Halflife (days)</label>
                     <input class="input-field" type="number" step="1" min="1" x-model.number="plasticityForm.temporalHalflife" placeholder="preset" @input="$nextTick(() => _updatePlasticityChart())" />
                   </div>
                 </div>
@@ -1762,7 +1892,7 @@ Authorization = "Bearer &lt;token from ~/.muninn/mcp.token&gt;"</pre>
 
             <!-- Cognitive Consistency Score gauge -->
             <div class="card-polished">
-              <h3 style="margin:0 0 1rem;color:var(--text-secondary);font-size:0.875rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Cognitive Consistency</h3>
+              <h3 style="margin:0 0 1rem;color:var(--text-secondary);font-size:0.875rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;" title="Cognitive Consistency Score — how closely cluster nodes agree on memory weights">Cognitive Consistency</h3>
               <div style="text-align:center;margin-bottom:1.25rem;">
                 <div style="font-size:2.5rem;font-weight:700;line-height:1;" :style="'color:' + ccsBarColor()" x-text="ccsScore() + '%'">&#8212;</div>
                 <div style="font-size:0.8125rem;color:var(--text-muted);margin-top:0.375rem;text-transform:capitalize;" x-text="clusterCCS ? clusterCCS.assessment : 'loading\u2026'"></div>
@@ -2146,6 +2276,52 @@ Authorization = "Bearer &lt;token from ~/.muninn/mcp.token&gt;"</pre>
     </div>
   </div>
 
+  <!-- ── Link creation modal ─────────────────────────────────────── -->
+  <div x-show="linkModal.show" x-cloak class="modal-backdrop" @click.self="closeLinkModal()" @keydown.escape.window="closeLinkModal()">
+    <div class="modal-box" style="max-width:480px;">
+      <h2 style="margin:0 0 1.25rem;font-size:1.125rem;">Create Association</h2>
+      <div class="form-group" style="margin-bottom:0.875rem;">
+        <label>Source ID</label>
+        <input class="input-field" :value="linkModal.sourceId" readonly style="opacity:0.6;cursor:not-allowed;margin-top:0.375rem;" />
+      </div>
+      <div class="form-group" style="margin-bottom:0.875rem;">
+        <label>Target Engram ID *</label>
+        <input class="input-field" style="margin-top:0.375rem;" type="text" placeholder="Paste the target engram ID"
+          x-model="linkModal.targetId" />
+      </div>
+      <div class="form-group" style="margin-bottom:0.875rem;">
+        <label>Relationship Type</label>
+        <select class="input-field" style="margin-top:0.375rem;" x-model.number="linkModal.relType">
+          <option value="1">Supports (1)</option>
+          <option value="2">Contradicts (2)</option>
+          <option value="3">Depends On (3)</option>
+          <option value="4">Supersedes (4)</option>
+          <option value="5">Relates To (5)</option>
+          <option value="6">Is Part Of (6)</option>
+          <option value="7">Causes (7)</option>
+          <option value="8">Preceded By (8)</option>
+          <option value="9">Followed By (9)</option>
+          <option value="10">Created By Person (10)</option>
+          <option value="11">Belongs To Project (11)</option>
+          <option value="12">References (12)</option>
+          <option value="13">Implements (13)</option>
+          <option value="14">Blocks (14)</option>
+          <option value="15">Resolves (15)</option>
+          <option value="16">Refines (16)</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:1.25rem;">
+        <label>Weight: <span x-text="parseFloat(linkModal.weight).toFixed(2)"></span></label>
+        <input type="range" min="0" max="1" step="0.05" x-model.number="linkModal.weight"
+          style="width:100%;margin-top:0.5rem;" />
+      </div>
+      <div style="display:flex;gap:0.75rem;justify-content:flex-end;">
+        <button class="btn-secondary" @click="closeLinkModal()">Cancel</button>
+        <button class="btn-primary" @click="createLink()">Create Link</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Sign out confirmation modal ─────────────────────────────── -->
   <div x-show="showSignOutConfirm" class="modal-backdrop" @click.self="showSignOutConfirm=false">
     <div class="modal-box" style="max-width:360px;text-align:center;">
@@ -2320,6 +2496,47 @@ Authorization = "Bearer &lt;token from ~/.muninn/mcp.token&gt;"</pre>
           Import
         </button>
       </div>
+    </div>
+  </div>
+
+  <!-- ── Keyboard Shortcuts Help Modal (Item 6) ──────────────────── -->
+  <div x-show="showShortcutsHelp" x-cloak
+       class="modal-backdrop" @click.self="showShortcutsHelp=false"
+       @keydown.escape.window="showShortcutsHelp=false">
+    <div class="modal-box" style="max-width:400px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+        <h2 style="margin:0;font-size:1.125rem;">Keyboard Shortcuts</h2>
+        <button class="btn-ghost" @click="showShortcutsHelp=false">✕</button>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:0.875rem;">
+        <tbody>
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:0.5rem 0.75rem 0.5rem 0;font-family:monospace;background:var(--bg-elevated);border-radius:0.25rem;padding:0.2rem 0.5rem;margin-right:0.5rem;font-size:0.8125rem;">
+              <kbd style="font-family:monospace;background:var(--bg-elevated);border:1px solid var(--border);border-radius:0.25rem;padding:0.1rem 0.4rem;font-size:0.8rem;">/</kbd>
+            </td>
+            <td style="padding:0.5rem 0.75rem;color:var(--text-secondary);">Focus search bar <span style="color:var(--text-muted);font-size:0.8125rem;">(Memories view)</span></td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:0.5rem 0.75rem 0.5rem 0;">
+              <kbd style="font-family:monospace;background:var(--bg-elevated);border:1px solid var(--border);border-radius:0.25rem;padding:0.1rem 0.4rem;font-size:0.8rem;">n</kbd>
+            </td>
+            <td style="padding:0.5rem 0.75rem;color:var(--text-secondary);">New memory <span style="color:var(--text-muted);font-size:0.8125rem;">(Memories view)</span></td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:0.5rem 0.75rem 0.5rem 0;">
+              <kbd style="font-family:monospace;background:var(--bg-elevated);border:1px solid var(--border);border-radius:0.25rem;padding:0.1rem 0.4rem;font-size:0.8rem;">Esc</kbd>
+            </td>
+            <td style="padding:0.5rem 0.75rem;color:var(--text-secondary);">Close modal / detail panel</td>
+          </tr>
+          <tr>
+            <td style="padding:0.5rem 0.75rem 0.5rem 0;">
+              <kbd style="font-family:monospace;background:var(--bg-elevated);border:1px solid var(--border);border-radius:0.25rem;padding:0.1rem 0.4rem;font-size:0.8rem;">?</kbd>
+            </td>
+            <td style="padding:0.5rem 0.75rem;color:var(--text-secondary);">Toggle this help panel</td>
+          </tr>
+        </tbody>
+      </table>
+      <p style="color:var(--text-muted);font-size:0.75rem;margin:0.875rem 0 0;">Shortcuts are disabled when typing in a text field.</p>
     </div>
   </div>
 

@@ -158,6 +158,7 @@ var subcommandHelp = map[string]func(){
 	"vault": func() {
 		printSubcommandUsage("vault", "vault management", "muninn vault <command> [flags]",
 			[][2]string{
+				{"create <name> [--public]", "Create and register a new vault"},
 				{"list [--pattern <glob>]", "List all vaults (with optional glob filter)"},
 				{"delete <name> [--yes] [--force]", "Delete a vault and all its memories"},
 				{"clear <name> [--yes] [--force]", "Remove all memories from a vault"},
@@ -173,12 +174,53 @@ var subcommandHelp = map[string]func(){
 				{"-h <host:port>", "Server host:port (default: localhost:8475)"},
 			},
 			[]string{
+				"muninn vault create myproject",
+				"muninn vault create public-notes --public",
 				"muninn vault list",
 				"muninn vault list --pattern 'proof-*'",
 				"muninn vault delete old-project --yes",
 				"muninn vault clone production staging",
 				"muninn vault export --vault mydata -o backup.muninn",
 				"muninn vault delete prod-vault -u admin -p",
+			})
+	},
+	"api-key": func() {
+		printSubcommandUsage("api-key", "API key management", "muninn api-key <command> [flags]",
+			[][2]string{
+				{"create --vault <vault>", "Create a new API key (token shown once)"},
+				{"  [--label <label>]", "Human-readable label for the key"},
+				{"  [--mode full|observe]", "Access mode: full (default) or observe"},
+				{"  [--expires 90d]", "Expiry duration (e.g. 90d, 365d)"},
+				{"list [--vault <vault>]", "List keys (no token values returned)"},
+				{"revoke <key-id>", "Revoke a key immediately"},
+				{"  [--vault <vault>]", "Vault the key belongs to"},
+				{"", ""},
+				{"-u <user>", "Admin username (default: root)"},
+				{"-p", "Prompt for password"},
+				{"-p<password>", "Inline password (no space)"},
+				{"-h <host:port>", "Server host:port (default: localhost:8475)"},
+			},
+			[]string{
+				"muninn api-key create --vault default --label my-agent",
+				"muninn api-key create --vault default --mode observe --expires 90d",
+				"muninn api-key list",
+				"muninn api-key list --vault default",
+				"muninn api-key revoke A1B2C3D4",
+			})
+	},
+	"admin": func() {
+		printSubcommandUsage("admin", "admin user management", "muninn admin <command> [flags]",
+			[][2]string{
+				{"change-password", "Interactively change the admin password"},
+				{"", ""},
+				{"-u <user>", "Admin username (default: root)"},
+				{"-p", "Prompt for current password"},
+				{"-p<password>", "Inline current password (no space)"},
+				{"-h <host:port>", "Server host:port (default: localhost:8475)"},
+			},
+			[]string{
+				"muninn admin change-password",
+				"muninn admin change-password -u root -p",
 			})
 	},
 	"show vaults": func() {
@@ -244,7 +286,9 @@ func printHelp() {
 	fmt.Printf("  %-32s %s\n", cyan("muninn logs 50"), "Show last 50 lines + tail")
 	fmt.Printf("  %-32s %s\n", cyan("muninn logs --no-follow"), "Print recent lines and exit")
 	fmt.Printf("  %-32s %s\n", cyan("muninn show vaults"), "List all vaults (requires server running)")
-	fmt.Printf("  %-32s %s\n", cyan("muninn vault <command>"), "Vault management (list, delete, clear, clone, merge, export, import)")
+	fmt.Printf("  %-32s %s\n", cyan("muninn vault <command>"), "Vault management (create, list, delete, clear, clone, merge, export, import)")
+	fmt.Printf("  %-32s %s\n", cyan("muninn api-key <command>"), "API key management (create, list, revoke)")
+	fmt.Printf("  %-32s %s\n", cyan("muninn admin change-password"), "Change the admin password")
 	fmt.Printf("  %-32s %s\n", cyan("muninn backup --output <dir>"), "Offline point-in-time backup (server must be stopped)")
 	fmt.Printf("  %-32s %s\n", cyan("muninn cluster"), "Cluster management (info, status, failover, add-node, remove-node)")
 	fmt.Printf("  %-32s %s\n", cyan("muninn completion <shell>"), "Shell completion (bash/zsh/fish)")

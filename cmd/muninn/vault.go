@@ -18,6 +18,7 @@ func printVaultUsage() {
 	fmt.Println("Usage: muninn vault <command> [flags]")
 	fmt.Println()
 	fmt.Println("Commands:")
+	fmt.Println("  create      <name> [--public]                    Create and register a new vault")
 	fmt.Println("  list        [--pattern <glob>]                   List all vaults")
 	fmt.Println("  delete      <name> [--yes] [--force]             Delete a vault and all its memories")
 	fmt.Println("  clear       <name> [--yes] [--force]             Remove all memories from a vault")
@@ -61,7 +62,7 @@ func runVault(args []string) {
 
 	// Validate the subcommand before authenticating so typos get fast feedback.
 	switch sub {
-	case "delete", "clear", "clone", "merge", "rename", "export", "import", "reindex-fts", "reembed", "recall-mode":
+	case "create", "delete", "clear", "clone", "merge", "rename", "export", "import", "reindex-fts", "reembed", "recall-mode":
 	default:
 		fmt.Printf("Unknown vault command: %q\n", sub)
 		printVaultUsage()
@@ -77,6 +78,8 @@ func runVault(args []string) {
 	}
 
 	switch sub {
+	case "create":
+		runVaultCreate(subArgs)
 	case "delete":
 		runVaultDelete(subArgs)
 	case "clear":
@@ -97,6 +100,72 @@ func runVault(args []string) {
 		runVaultReembed(subArgs)
 	case "recall-mode":
 		runVaultRecallMode(subArgs)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// vault create
+// ---------------------------------------------------------------------------
+
+func runVaultCreate(args []string) {
+	var name string
+	var public bool
+
+	for _, a := range args {
+		switch a {
+		case "--public":
+			public = true
+		default:
+			if !strings.HasPrefix(a, "-") && name == "" {
+				name = a
+			}
+		}
+	}
+
+	if name == "" {
+		fmt.Println("Usage: muninn vault create <vault-name> [--public]")
+		fmt.Println()
+		fmt.Println("  Registers a new vault in the auth store.")
+		fmt.Println("  By default the vault is locked (API key required). Use --public to allow open access.")
+		fmt.Println("  The vault will appear in 'muninn vault list' immediately after creation.")
+		return
+	}
+
+	bodyBytes, err := json.Marshal(map[string]any{"name": name, "public": public})
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequest("PUT",
+		fmt.Sprintf("%s/api/admin/vaults/config", vaultAdminBase),
+		bytes.NewReader(bodyBytes))
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	addSessionCookie(req)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("Error connecting to MuninnDB: %v\n", err)
+		fmt.Println("Is muninn running? Try: muninn status")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		printHTTPError(resp)
+		return
+	}
+
+	fmt.Printf("  Vault %q created.\n", name)
+	if public {
+		fmt.Println("  Access: public (no API key required)")
+	} else {
+		fmt.Println("  Access: locked (API key required — use 'muninn api-key create' to generate one)")
 	}
 }
 

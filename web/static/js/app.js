@@ -31,6 +31,14 @@ document.addEventListener('alpine:init', () => {
     newMemoryForm: { concept: '', content: '', tagsRaw: '', confidence: 0.8 },
     confirmForgetId: null,
 
+    // Edit/Evolve
+    editingMemory: false,
+    editMemoryForm: { content: '', reason: '' },
+    editMemorySaving: false,
+
+    // Link modal
+    linkModal: { show: false, sourceId: '', targetId: '', relType: 5, weight: 0.8 },
+
     // Graph
     graphLoaded: false,
     _cy: null,
@@ -108,6 +116,17 @@ document.addEventListener('alpine:init', () => {
     // Observability
     obs: null,
     _obsInterval: null,
+
+    // Contradictions
+    contradictions: [],
+    contradictionsLoaded: false,
+    memoriesSubTab: 'list', // 'list' | 'contradictions'
+
+    // Backup
+    backupLoading: false,
+
+    // Keyboard shortcuts help
+    showShortcutsHelp: false,
 
     // Settings
     settingsTab: 'connect', // 'connect' | 'vault' | 'plugins' | 'keys' | 'admin'
@@ -208,6 +227,40 @@ document.addEventListener('alpine:init', () => {
       window.addEventListener('hashchange', onHash);
       onHash();
 
+      // Keyboard shortcuts
+      document.addEventListener('keydown', (e) => {
+        // Ignore when typing in an input/textarea/select
+        const tag = (e.target.tagName || '').toLowerCase();
+        const inField = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
+
+        if (e.key === 'Escape') {
+          // Close any open modal/panel
+          if (this.showNewMemoryModal)  { this.showNewMemoryModal = false; return; }
+          if (this.selectedMemory)      { this.selectedMemory = null; return; }
+          if (this.confirmForgetId)     { this.confirmForgetId = null; return; }
+          if (this.showSignOutConfirm)  { this.showSignOutConfirm = false; return; }
+          if (this.vaultActionModal.show) { this.vaultActionModal.show = false; return; }
+          if (this.cloneModal.show)     { this.cloneModal.show = false; return; }
+          if (this.mergeModal.show)     { this.mergeModal.show = false; return; }
+          if (this.importModal.show)    { this.importModal.show = false; return; }
+          if (this.showShortcutsHelp)   { this.showShortcutsHelp = false; return; }
+        }
+
+        if (inField) return;
+
+        if (e.key === '/' && this.currentView === 'memories') {
+          e.preventDefault();
+          const input = document.getElementById('memory-search-input');
+          if (input) input.focus();
+        } else if (e.key === 'n' && this.currentView === 'memories') {
+          e.preventDefault();
+          this.showNewMemoryModal = true;
+        } else if (e.key === '?') {
+          e.preventDefault();
+          this.showShortcutsHelp = !this.showShortcutsHelp;
+        }
+      });
+
       // Fetch version from public health endpoint
       try {
         const h = await fetch('/api/health').then(r => r.json());
@@ -293,6 +346,7 @@ document.addEventListener('alpine:init', () => {
       } else if (view === 'memories') {
         this.page = 0;
         this.loadMemories();
+        this.loadContradictions();
       } else if (view === 'session') {
         this.loadSession();
       } else if (view === 'observability') {
@@ -644,12 +698,36 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
+    async loadContradictions() {
+      try {
+        const data = await this.apiCall('/api/contradictions?vault=' + encodeURIComponent(this.vault));
+        this.contradictions = data.contradictions || [];
+        this.contradictionsLoaded = true;
+      } catch (_) {
+        this.contradictions = [];
+        this.contradictionsLoaded = true;
+      }
+    },
+
     openMemory(m) {
       this.selectedMemory = m;
       // Navigate to memories view if not there
       if (this.currentView !== 'memories') {
         this.currentView = 'memories';
       }
+    },
+
+    selectedMemoryIndex() {
+      if (!this.selectedMemory || !this.memories.length) return -1;
+      return this.memories.findIndex(m => m.id === this.selectedMemory.id);
+    },
+
+    navigateMemory(delta) {
+      const idx = this.selectedMemoryIndex();
+      if (idx === -1) return;
+      const next = idx + delta;
+      if (next < 0 || next >= this.memories.length) return;
+      this.selectedMemory = this.memories[next];
     },
 
     forgetMemory(id) {
@@ -693,6 +771,120 @@ document.addEventListener('alpine:init', () => {
         await this.loadMemories();
       } catch (err) {
         this.addNotification('error', 'Create failed: ' + err.message);
+      }
+    },
+
+    // ── Edit / Evolve ─────────────────────────────────────────────────────
+    startEditMemory() {
+      this.editingMemory = true;
+      this.editMemoryForm.content = this.selectedMemory ? this.selectedMemory.content : '';
+      this.editMemoryForm.reason = '';
+    },
+
+    cancelEditMemory() {
+      this.editingMemory = false;
+      this.editMemoryForm = { content: '', reason: '' };
+    },
+
+    async saveEditMemory() {
+      if (!this.selectedMemory) return;
+      if (!this.editMemoryForm.content.trim()) {
+        this.addNotification('error', 'Content cannot be empty');
+        return;
+      }
+      if (!this.editMemoryForm.reason.trim()) {
+        this.addNotification('error', 'Reason is required');
+        return;
+      }
+      this.editMemorySaving = true;
+      try {
+        const resp = await this.apiCall(
+          '/api/engrams/' + encodeURIComponent(this.selectedMemory.id) + '/evolve',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              new_content: this.editMemoryForm.content,
+              reason: this.editMemoryForm.reason,
+            }),
+          }
+        );
+        this.selectedMemory = { ...this.selectedMemory, content: this.editMemoryForm.content };
+        this.editingMemory = false;
+        this.editMemoryForm = { content: '', reason: '' };
+        this.addNotification('success', 'Memory updated');
+        // Refresh the list so the new content shows there too
+        await this.loadMemories();
+      } catch (err) {
+        this.addNotification('error', 'Evolve failed: ' + err.message);
+      } finally {
+        this.editMemorySaving = false;
+      }
+    },
+
+    // ── Link creation ──────────────────────────────────────────────────────
+    openLinkModal(sourceId) {
+      this.linkModal = { show: true, sourceId: sourceId, targetId: '', relType: 5, weight: 0.8 };
+    },
+
+    closeLinkModal() {
+      this.linkModal = { show: false, sourceId: '', targetId: '', relType: 5, weight: 0.8 };
+    },
+
+    async createLink() {
+      if (!this.linkModal.targetId.trim()) {
+        this.addNotification('error', 'Target ID is required');
+        return;
+      }
+      try {
+        await this.apiCall('/api/link', {
+          method: 'POST',
+          body: JSON.stringify({
+            source_id: this.linkModal.sourceId,
+            target_id: this.linkModal.targetId.trim(),
+            rel_type: parseInt(this.linkModal.relType, 10),
+            weight: parseFloat(this.linkModal.weight),
+            vault: this.vault,
+          }),
+        });
+        this.closeLinkModal();
+        this.addNotification('success', 'Association created');
+      } catch (err) {
+        this.addNotification('error', 'Link failed: ' + err.message);
+      }
+    },
+
+    // ── Create vault ───────────────────────────────────────────────────────
+    async createVault() {
+      const name = prompt('Enter new vault name (lowercase letters, digits, hyphens, underscores; 1-64 chars):');
+      if (!name) return;
+      const valid = /^[a-z0-9_-]{1,64}$/.test(name);
+      if (!valid) {
+        this.addNotification('error', 'Vault name must be 1-64 lowercase letters, digits, hyphens, or underscores');
+        return;
+      }
+      try {
+        // Register vault config entry (creates the vault record)
+        const r = await fetch('/api/admin/vaults/config', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name }),
+        });
+        if (!r.ok) {
+          const text = await r.text().catch(() => r.statusText);
+          throw new Error(r.status + ': ' + text);
+        }
+        // Hello handshake registers the vault name in the storage index
+        await fetch('/api/hello', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ version: '1', vault: name }),
+        }).catch(() => {});
+        this.vault = name;
+        localStorage.setItem('muninnVault', name);
+        await this.loadVaults();
+        this.addNotification('success', 'Vault  + name +  created');
+      } catch (err) {
+        this.addNotification('error', 'Create vault failed: ' + err.message);
       }
     },
 
@@ -819,6 +1011,24 @@ document.addEventListener('alpine:init', () => {
         this.sessionEntries = data.entries || (Array.isArray(data) ? data : []);
       } catch (err) {
         this.addNotification('error', 'Session: ' + err.message);
+      }
+    },
+
+    // ── Backup ─────────────────────────────────────────────────────────────
+    async triggerBackup() {
+      this.backupLoading = true;
+      try {
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const outputDir = './backups/muninn-backup-' + ts;
+        const data = await this.apiCall('/api/admin/backup', {
+          method: 'POST',
+          body: JSON.stringify({ output_dir: outputDir }),
+        });
+        this.addNotification('success', 'Backup complete: ' + data.output_dir + ' (' + data.elapsed + ')');
+      } catch (err) {
+        this.addNotification('error', 'Backup failed: ' + err.message);
+      } finally {
+        this.backupLoading = false;
       }
     },
 
@@ -1085,6 +1295,21 @@ document.addEventListener('alpine:init', () => {
       } catch (_) {
         this.addNotification('error', 'Copy failed — select and copy manually');
       }
+    },
+
+    // ── API key expiry display ──────────────────────────────────────────────
+    formatKeyExpiry(expiresAt) {
+      if (!expiresAt) return 'Never';
+      const exp = new Date(expiresAt);
+      const now = new Date();
+      const diffMs = exp - now;
+      if (diffMs <= 0) return 'Expired';
+      const diffDays = Math.round(diffMs / 86400000);
+      if (diffDays === 0) return 'Today';
+      if (diffDays === 1) return 'Tomorrow';
+      if (diffDays < 30) return 'in ' + diffDays + ' days';
+      if (diffDays < 365) return 'in ' + Math.round(diffDays / 30) + ' months';
+      return exp.toLocaleDateString();
     },
 
     // ── Confidence helpers ─────────────────────────────────────────────────

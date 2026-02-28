@@ -90,6 +90,14 @@ func main() {
 			runVault(rest)
 			return
 		}
+		if sub == "api-key" || strings.HasPrefix(sub, "api-key:") {
+			runAPIKey(rest)
+			return
+		}
+		if sub == "admin" || strings.HasPrefix(sub, "admin:") {
+			runAdmin(rest)
+			return
+		}
 		if strings.HasPrefix(sub, "cluster:") {
 			runCluster(rest)
 			return
