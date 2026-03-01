@@ -1068,6 +1068,27 @@ func TestHandleFindByEntity_NoResults(t *testing.T) {
 	}
 }
 
+type findByEntityCapturingEngine struct {
+	fakeEngine
+	lastLimit int
+}
+
+func (f *findByEntityCapturingEngine) FindByEntity(_ context.Context, _, _ string, limit int) ([]*storage.Engram, error) {
+	f.lastLimit = limit
+	return []*storage.Engram{}, nil
+}
+
+func TestHandleFindByEntity_LimitCapped(t *testing.T) {
+	eng := &findByEntityCapturingEngine{}
+	srv := newTestServerWith(eng)
+	// Request limit=999; handler must cap to 50 before calling engine.
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_find_by_entity","arguments":{"vault":"default","entity_name":"TestEntity","limit":999}}}`
+	postRPC(t, srv, body)
+	if eng.lastLimit != 50 {
+		t.Errorf("expected engine to receive limit=50 after capping, got %d", eng.lastLimit)
+	}
+}
+
 // ── muninn_where_left_off ────────────────────────────────────────────────────
 
 // whereLeftOffEngine returns a populated WhereLeftOff result for shape tests.
