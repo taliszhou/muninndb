@@ -83,6 +83,15 @@ func (f *fakeEngine) GetVaultPlasticity(_ context.Context, _ string) (*auth.Reso
 	r := auth.ResolvePlasticity(nil)
 	return &r, nil
 }
+func (f *fakeEngine) RememberTree(_ context.Context, req *RememberTreeRequest) (*RememberTreeResult, error) {
+	return &RememberTreeResult{RootID: "fake-root-id", NodeMap: map[string]string{}}, nil
+}
+func (f *fakeEngine) RecallTree(_ context.Context, vault, rootID string, maxDepth, limit int, includeCompleted bool) (*RecallTreeResult, error) {
+	return &RecallTreeResult{Root: &TreeNode{ID: rootID, Concept: "fake", State: "active", Children: []TreeNode{}}}, nil
+}
+func (f *fakeEngine) AddChild(_ context.Context, vault, parentID string, child *AddChildRequest) (*AddChildResult, error) {
+	return &AddChildResult{ChildID: "fake-child-id", Ordinal: 1}, nil
+}
 
 func newTestServer() *MCPServer {
 	return New(":0", &fakeEngine{}, "", nil)

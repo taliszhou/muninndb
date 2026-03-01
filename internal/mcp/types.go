@@ -185,6 +185,59 @@ type RetryEnrichResult struct {
 	Note            string   `json:"note,omitempty"`
 }
 
+// ── Tree types ────────────────────────────────────────────────────────────────
+
+// TreeNodeInput is one node in a tree passed to muninn_remember_tree.
+type TreeNodeInput struct {
+	Concept  string          `json:"concept"`
+	Content  string          `json:"content"`
+	Type     string          `json:"type,omitempty"`
+	Tags     []string        `json:"tags,omitempty"`
+	Children []TreeNodeInput `json:"children,omitempty"`
+}
+
+// RememberTreeRequest is the input to RememberTree.
+type RememberTreeRequest struct {
+	Vault string        `json:"vault"`
+	Root  TreeNodeInput `json:"root"`
+}
+
+// RememberTreeResult is returned by RememberTree.
+type RememberTreeResult struct {
+	RootID  string            `json:"root_id"`
+	NodeMap map[string]string `json:"node_map"`
+}
+
+// TreeNode is a node in the recalled tree returned by muninn_recall_tree.
+type TreeNode struct {
+	ID           string     `json:"id"`
+	Concept      string     `json:"concept"`
+	State        string     `json:"state"`
+	Ordinal      int32      `json:"ordinal"`
+	LastAccessed string     `json:"last_accessed,omitempty"`
+	Children     []TreeNode `json:"children"`
+}
+
+// RecallTreeResult wraps the root TreeNode.
+type RecallTreeResult struct {
+	Root *TreeNode `json:"root"`
+}
+
+// AddChildRequest is the input for a single child node in muninn_add_child.
+type AddChildRequest struct {
+	Concept string   `json:"concept"`
+	Content string   `json:"content"`
+	Type    string   `json:"type,omitempty"`
+	Tags    []string `json:"tags,omitempty"`
+	Ordinal *int32   `json:"ordinal,omitempty"` // nil = append at end
+}
+
+// AddChildResult is returned by AddChild.
+type AddChildResult struct {
+	ChildID string `json:"child_id"`
+	Ordinal int32  `json:"ordinal"`
+}
+
 // --- Cognitive push notification param types ---
 // These are pre-serialized to json.RawMessage at emission sites.
 

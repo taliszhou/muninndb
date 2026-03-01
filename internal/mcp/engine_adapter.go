@@ -233,3 +233,65 @@ func (a *mcpEngineAdapter) GetVaultPlasticity(_ context.Context, vault string) (
 	r := a.eng.ResolveVaultPlasticity(vault)
 	return &r, nil
 }
+
+func (a *mcpEngineAdapter) RememberTree(ctx context.Context, req *RememberTreeRequest) (*RememberTreeResult, error) {
+	engineReq := &engine.RememberTreeRequest{
+		Vault: req.Vault,
+		Root:  convertTreeNodeInput(req.Root),
+	}
+	r, err := a.eng.RememberTree(ctx, engineReq)
+	if err != nil {
+		return nil, err
+	}
+	return &RememberTreeResult{RootID: r.RootID, NodeMap: r.NodeMap}, nil
+}
+
+func (a *mcpEngineAdapter) RecallTree(ctx context.Context, vault, rootID string, maxDepth, limit int, includeCompleted bool) (*RecallTreeResult, error) {
+	node, err := a.eng.RecallTree(ctx, vault, rootID, maxDepth, limit, includeCompleted)
+	if err != nil {
+		return nil, err
+	}
+	return &RecallTreeResult{Root: convertTreeNode(node)}, nil
+}
+
+func (a *mcpEngineAdapter) AddChild(ctx context.Context, vault, parentID string, child *AddChildRequest) (*AddChildResult, error) {
+	// AddChild is implemented in Task 7; for now stub to keep the build green.
+	// Remove this stub when Task 7 is complete.
+	return nil, fmt.Errorf("AddChild: not yet implemented")
+}
+
+// convertTreeNodeInput converts MCP → engine input types.
+func convertTreeNodeInput(n TreeNodeInput) engine.TreeNodeInput {
+	out := engine.TreeNodeInput{
+		Concept: n.Concept,
+		Content: n.Content,
+		Type:    n.Type,
+		Tags:    n.Tags,
+	}
+	for _, c := range n.Children {
+		out.Children = append(out.Children, convertTreeNodeInput(c))
+	}
+	return out
+}
+
+// convertTreeNode converts engine.TreeNode → mcp.TreeNode recursively.
+func convertTreeNode(n *engine.TreeNode) *TreeNode {
+	if n == nil {
+		return nil
+	}
+	out := &TreeNode{
+		ID:           n.ID,
+		Concept:      n.Concept,
+		State:        n.State,
+		Ordinal:      n.Ordinal,
+		LastAccessed: n.LastAccessed,
+		Children:     make([]TreeNode, 0, len(n.Children)),
+	}
+	for _, c := range n.Children {
+		child := convertTreeNode(&c)
+		if child != nil {
+			out.Children = append(out.Children, *child)
+		}
+	}
+	return out
+}

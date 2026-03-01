@@ -85,6 +85,13 @@ func TestMCPEngineAdapterTraverseDefaultMaxHops(t *testing.T) {
 	}
 }
 
+// TestAdapterImplementsEngineInterface is a compile-time check that mcpEngineAdapter
+// satisfies the EngineInterface contract.
+func TestAdapterImplementsEngineInterface(t *testing.T) {
+	// Compile-time check: mcpEngineAdapter must implement EngineInterface.
+	var _ EngineInterface = (*mcpEngineAdapter)(nil)
+}
+
 // TestMCPEngineAdapterTraverseExplicitMaxHops verifies that an explicit MaxHops
 // value is not overridden by the default.
 func TestMCPEngineAdapterTraverseExplicitMaxHops(t *testing.T) {

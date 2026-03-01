@@ -56,4 +56,18 @@ type EngineInterface interface {
 
 	// GetVaultPlasticity returns the resolved plasticity config for a vault.
 	GetVaultPlasticity(ctx context.Context, vault string) (*auth.ResolvedPlasticity, error)
+
+	// RememberTree writes a nested engram tree in one call.
+	// Creates all engrams, is_part_of associations, and ordinal keys depth-first.
+	// On failure, already-written nodes remain in storage (not atomic).
+	RememberTree(ctx context.Context, req *RememberTreeRequest) (*RememberTreeResult, error)
+
+	// RecallTree returns the complete ordered tree rooted at rootID.
+	// maxDepth=0 means unlimited depth. limit caps children per node per level (0 = no limit).
+	// When includeCompleted=false, completed nodes and their subtrees are excluded.
+	RecallTree(ctx context.Context, vault, rootID string, maxDepth, limit int, includeCompleted bool) (*RecallTreeResult, error)
+
+	// AddChild adds a single engram as a child of parentID, writing the is_part_of
+	// association and ordinal key. ordinal=nil appends after the last existing child.
+	AddChild(ctx context.Context, vault, parentID string, child *AddChildRequest) (*AddChildResult, error)
 }
