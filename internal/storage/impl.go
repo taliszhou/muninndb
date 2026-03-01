@@ -278,6 +278,11 @@ func (ps *PebbleStore) WriteEngram(ctx context.Context, wsPrefix [8]byte, eng *E
 	// 0x10: relevance bucket key
 	batch.Set(keys.RelevanceBucketKey(wsPrefix, eng.Relevance, [16]byte(eng.ID)), []byte{}, nil)
 
+	// 0x22: LastAccess index — seed with LastAccess (= CreatedAt for new engrams).
+	laMillis := eng.LastAccess.UnixMilli()
+	laKey := keys.LastAccessIndexKey(wsPrefix, laMillis, [16]byte(eng.ID))
+	batch.Set(laKey, nil, nil)
+
 	// Commit — default: one fsync per user-submitted engram (pebble.Sync).
 	// User content is the irreplaceable asset; immediate durability is the
 	// correct tradeoff for a write-light memory store.

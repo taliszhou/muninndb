@@ -228,6 +228,10 @@ func (ps *PebbleStore) UpdateMetadata(ctx context.Context, wsPrefix [8]byte, id 
 		return fmt.Errorf("engram not found")
 	}
 	oldState := oldMetas[0].State
+	var prevLastAccessMillis int64
+	if !oldMetas[0].LastAccess.IsZero() {
+		prevLastAccessMillis = oldMetas[0].LastAccess.UnixMilli()
+	}
 
 	// Read raw 0x01 bytes without decoding the full ERF structure.
 	engramKey := keys.EngramKey(wsPrefix, [16]byte(id))
@@ -271,6 +275,14 @@ func (ps *PebbleStore) UpdateMetadata(ctx context.Context, wsPrefix [8]byte, id 
 
 	if err := batch.Commit(pebble.NoSync); err != nil {
 		return fmt.Errorf("commit batch: %w", err)
+	}
+
+	// Update LastAccess index (best effort — index inconsistency is non-fatal).
+	if !meta.LastAccess.IsZero() {
+		newMillis := meta.LastAccess.UnixMilli()
+		if newMillis != prevLastAccessMillis {
+			_ = ps.WriteLastAccessEntry(ctx, wsPrefix, id, prevLastAccessMillis, newMillis)
+		}
 	}
 
 	// Append provenance entry via persistent worker (best effort — drops if full).

@@ -51,6 +51,7 @@ func TestKeyPrefixesAreUnique(t *testing.T) {
 		{"EntityEngramLinkKey", EntityEngramLinkKey([8]byte{}, [16]byte{}, [8]byte{})},
 		{"RelationshipKey", RelationshipKey([8]byte{}, [16]byte{}, [8]byte{}, 0x01, [8]byte{})},
 		{"EntityReverseIndexKey", EntityReverseIndexKey([8]byte{}, [8]byte{}, [16]byte{})},
+		{"LastAccessIndexKey", LastAccessIndexKey([8]byte{}, 0, [16]byte{})},
 	}
 
 	seen := make(map[byte]string)
@@ -227,6 +228,25 @@ func TestEntityReverseIndexKey(t *testing.T) {
 	assert.Equal(t, byte(0x23), prefix[0])
 	assert.Equal(t, 9, len(prefix))
 	assert.True(t, bytes.HasPrefix(k, prefix))
+}
+
+func TestLastAccessIndexKey_DescendingOrder(t *testing.T) {
+	ws := [8]byte{1, 2, 3, 4, 5, 6, 7, 8}
+	id1 := [16]byte{1}
+	id2 := [16]byte{2}
+
+	newerKey := LastAccessIndexKey(ws, 2000, id1)
+	olderKey := LastAccessIndexKey(ws, 1000, id2)
+
+	// In ascending byte order, newer key should sort first (smaller inverted millis).
+	assert.True(t, bytes.Compare(newerKey, olderKey) < 0, "newer access should sort first in ascending scan")
+	assert.Equal(t, 33, len(newerKey))
+	assert.Equal(t, byte(0x22), newerKey[0])
+
+	prefix := LastAccessIndexPrefix(ws)
+	assert.Equal(t, 9, len(prefix))
+	assert.Equal(t, byte(0x22), prefix[0])
+	assert.True(t, bytes.HasPrefix(newerKey, prefix))
 }
 
 func TestEntityNameHash_Normalizes(t *testing.T) {

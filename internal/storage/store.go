@@ -179,6 +179,18 @@ type EngineStore interface {
 	// UpsertRelationshipRecord writes a vault-scoped relationship record.
 	UpsertRelationshipRecord(ctx context.Context, ws [8]byte, engramID ULID, record RelationshipRecord) error
 
+	// WriteLastAccessEntry writes/updates the 0x22 LastAccess index entry.
+	// prevMillis is the old LastAccess unix-millis (0 if first write).
+	// newMillis is the new LastAccess unix-millis.
+	WriteLastAccessEntry(ctx context.Context, ws [8]byte, id ULID, prevMillis, newMillis int64) error
+
+	// ScanLastAccessDesc scans the 0x22 index in descending LastAccess order
+	// (ascending byte scan due to inverted millis encoding).
+	ScanLastAccessDesc(ctx context.Context, ws [8]byte, fn func(id ULID, lastAccessMillis int64) error) error
+
+	// DeleteLastAccessEntry removes the 0x22 index entry for a deleted engram.
+	DeleteLastAccessEntry(ctx context.Context, ws [8]byte, id ULID, lastAccessMillis int64) error
+
 	// Close flushes all pending writes and closes the Pebble database.
 	Close() error
 }

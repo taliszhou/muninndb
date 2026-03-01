@@ -117,6 +117,11 @@ func (b *pebbleStoreBatch) WriteEngram(ctx context.Context, wsPrefix [8]byte, en
 	// 0x10: relevance bucket key
 	b.batch.Set(keys.RelevanceBucketKey(wsPrefix, eng.Relevance, id16), []byte{}, nil)
 
+	// 0x22: LastAccess index — seed with LastAccess (= CreatedAt for new engrams).
+	laMillis := eng.LastAccess.UnixMilli()
+	laKey := keys.LastAccessIndexKey(wsPrefix, laMillis, id16)
+	b.batch.Set(laKey, nil, nil)
+
 	b.pendingItems = append(b.pendingItems, batchPendingItem{wsPrefix: wsPrefix, eng: eng})
 	return nil
 }

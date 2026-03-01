@@ -599,3 +599,27 @@ func EntityReverseIndexPrefix(nameHash [8]byte) []byte {
 	copy(key[1:9], nameHash[:])
 	return key
 }
+
+// LastAccessIndexKey constructs the LastAccess index key (0x22 prefix).
+// Uses inverted milliseconds (^uint64(unixMillis)) so ascending Pebble scan
+// returns most-recently-accessed entries first.
+// Key: 0x22 | wsPrefix(8) | invertedMillis(8) | engramID(16) = 33 bytes
+// Value: empty (all data is in the key).
+func LastAccessIndexKey(ws [8]byte, lastAccessMillis int64, engramID [16]byte) []byte {
+	key := make([]byte, 1+8+8+16)
+	key[0] = 0x22
+	copy(key[1:9], ws[:])
+	inverted := ^uint64(lastAccessMillis)
+	binary.BigEndian.PutUint64(key[9:17], inverted)
+	copy(key[17:33], engramID[:])
+	return key
+}
+
+// LastAccessIndexPrefix returns the 9-byte prefix for scanning all LastAccess
+// entries in a vault (0x22 | ws(8)). Ascending scan yields most-recently-accessed first.
+func LastAccessIndexPrefix(ws [8]byte) []byte {
+	key := make([]byte, 1+8)
+	key[0] = 0x22
+	copy(key[1:9], ws[:])
+	return key
+}
