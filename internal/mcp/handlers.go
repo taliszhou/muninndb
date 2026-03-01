@@ -11,6 +11,7 @@ import (
 	"github.com/scrypster/muninndb/internal/auth"
 	"github.com/scrypster/muninndb/internal/storage"
 	"github.com/scrypster/muninndb/internal/transport/mbp"
+	"golang.org/x/text/unicode/norm"
 )
 
 func (s *MCPServer) handleRemember(ctx context.Context, w http.ResponseWriter, id json.RawMessage, vault string, args map[string]any) {
@@ -782,26 +783,44 @@ func applyTypeArgs(args map[string]any, req *mbp.WriteRequest) {
 
 // applyEnrichmentArgs parses optional inline enrichment fields (summary, entities,
 // relationships) from MCP tool call arguments onto the WriteRequest.
+var validEntityTypes = map[string]bool{
+	"person": true, "organization": true, "location": true, "concept": true,
+	"technology": true, "project": true, "tool": true, "database": true,
+	"service": true, "framework": true, "language": true, "product": true,
+	"event": true, "other": true,
+}
+
 func applyEnrichmentArgs(args map[string]any, req *mbp.WriteRequest) {
 	if summary, ok := args["summary"].(string); ok && summary != "" {
 		req.Summary = summary
 	}
 	if entitiesAny, ok := args["entities"].([]any); ok {
-		for _, eAny := range entitiesAny {
+		for i, eAny := range entitiesAny {
+			if i >= 20 {
+				break
+			}
 			eMap, ok := eAny.(map[string]any)
 			if !ok {
 				continue
 			}
 			name, _ := eMap["name"].(string)
 			typ, _ := eMap["type"].(string)
+			name = strings.TrimSpace(norm.NFKC.String(name))
+			typ = strings.ToLower(strings.TrimSpace(typ))
 			if name == "" || typ == "" {
 				continue
+			}
+			if !validEntityTypes[typ] {
+				typ = "other"
 			}
 			req.Entities = append(req.Entities, mbp.InlineEntity{Name: name, Type: typ})
 		}
 	}
 	if relsAny, ok := args["relationships"].([]any); ok {
-		for _, rAny := range relsAny {
+		for i, rAny := range relsAny {
+			if i >= 30 {
+				break
+			}
 			rMap, ok := rAny.(map[string]any)
 			if !ok {
 				continue

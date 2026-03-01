@@ -10,6 +10,7 @@ import (
 
 	"github.com/scrypster/muninndb/internal/storage"
 	"github.com/scrypster/muninndb/internal/transport/mbp"
+	"github.com/stretchr/testify/require"
 )
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -885,6 +886,80 @@ func TestHandleContradictions_EngineError(t *testing.T) {
 	if resp.Error == nil || resp.Error.Code != -32000 {
 		t.Errorf("expected -32000 for engine error, got %v", resp.Error)
 	}
+}
+
+// ── applyEnrichmentArgs ──────────────────────────────────────────────────────
+
+func TestApplyEnrichmentArgs_NormalizesEntityNames(t *testing.T) {
+	// Entity name should be NFKC-normalized and whitespace-trimmed
+	args := map[string]any{
+		"entities": []any{
+			map[string]any{"name": "  PostgreSQL  ", "type": "database"},
+			map[string]any{"name": "openai", "type": "organization"},
+		},
+	}
+	req := &mbp.WriteRequest{}
+	applyEnrichmentArgs(args, req)
+	require.Len(t, req.Entities, 2)
+	require.Equal(t, "PostgreSQL", req.Entities[0].Name, "whitespace should be trimmed")
+	require.Equal(t, "openai", req.Entities[1].Name)
+}
+
+func TestApplyEnrichmentArgs_EnforcesEntityTypeVocabulary(t *testing.T) {
+	args := map[string]any{
+		"entities": []any{
+			map[string]any{"name": "Foo", "type": "invalid_type"},
+			map[string]any{"name": "Bar", "type": "DATABASE"}, // uppercase — normalize to "database"
+			map[string]any{"name": "Baz", "type": "person"},
+		},
+	}
+	req := &mbp.WriteRequest{}
+	applyEnrichmentArgs(args, req)
+	require.Len(t, req.Entities, 3)
+	require.Equal(t, "other", req.Entities[0].Type, "unknown type should become 'other'")
+	require.Equal(t, "database", req.Entities[1].Type, "type should be lowercased")
+	require.Equal(t, "person", req.Entities[2].Type)
+}
+
+func TestApplyEnrichmentArgs_CapsAt20Entities(t *testing.T) {
+	entities := make([]any, 25)
+	for i := range entities {
+		entities[i] = map[string]any{"name": fmt.Sprintf("Entity%d", i), "type": "person"}
+	}
+	args := map[string]any{"entities": entities}
+	req := &mbp.WriteRequest{}
+	applyEnrichmentArgs(args, req)
+	require.Len(t, req.Entities, 20, "entities should be capped at 20")
+}
+
+func TestApplyEnrichmentArgs_CapsAt30Relationships(t *testing.T) {
+	rels := make([]any, 35)
+	for i := range rels {
+		rels[i] = map[string]any{
+			"target_id": fmt.Sprintf("01ABCDEFGHJKMNPQRSTVWX%04d", i)[:26],
+			"relation":  "uses",
+			"weight":    0.8,
+		}
+	}
+	args := map[string]any{"relationships": rels}
+	req := &mbp.WriteRequest{}
+	applyEnrichmentArgs(args, req)
+	require.Len(t, req.Relationships, 30, "relationships should be capped at 30")
+}
+
+func TestApplyEnrichmentArgs_SkipsEmptyOrInvalidEntities(t *testing.T) {
+	args := map[string]any{
+		"entities": []any{
+			map[string]any{"name": "", "type": "person"},    // empty name — skip
+			map[string]any{"name": "   ", "type": "person"}, // whitespace only — skip
+			map[string]any{"name": "Alice", "type": ""},     // empty type — skip
+			map[string]any{"name": "Bob", "type": "person"}, // valid
+		},
+	}
+	req := &mbp.WriteRequest{}
+	applyEnrichmentArgs(args, req)
+	require.Len(t, req.Entities, 1)
+	require.Equal(t, "Bob", req.Entities[0].Name)
 }
 
 // ── muninn_status ────────────────────────────────────────────────────────────
