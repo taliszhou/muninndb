@@ -402,16 +402,20 @@ func (rp *RetroactiveProcessor) processEngram(ctx context.Context, eng *Engram) 
 		// Read per-stage digest flags so we don't re-run stages the caller already provided.
 		// engramHasEntities previously used len(eng.KeyPoints) > 0, which incorrectly
 		// conflated summarization keypoints with entity extraction. Flags are authoritative.
-		flags, _ := rp.store.GetDigestFlags(ctx, eng.ID)
+		flags, err := rp.store.GetDigestFlags(ctx, eng.ID)
+		if err != nil {
+			slog.Warn("enrich: failed to read digest flags, skipping engram", "id", eng.ID.String(), "err", err)
+			return nil
+		}
 		hasSummary := eng.Summary != "" || (flags&DigestSummarized != 0)
 		hasEntities := flags&DigestEntities != 0
 		hasRelationships := flags&DigestRelationships != 0
 		hasClassification := flags&DigestClassified != 0
 		_ = hasRelationships // will be used in Task 2 wiring
-		_ = hasClassification
+		_ = hasClassification // will be used in Task 2 wiring
 
-		// If both summary and entities are already present from caller,
-		// skip the enrich call entirely (all fields covered).
+		// Both summary and entity extraction are already done for this engram — skip it.
+		// hasRelationships and hasClassification will be added to this gate in Task 2.
 		if hasSummary && hasEntities {
 			return nil
 		}
