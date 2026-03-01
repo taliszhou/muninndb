@@ -58,7 +58,11 @@ document.addEventListener('alpine:init', () => {
 
     // Graph
     graphLoaded: false,
+    graphTab: 'memory',
     _cy: null,
+    entityGraphLoaded: false,
+    entityGraphStatus: '',
+    _entityCy: null,
 
     // Session
     sessionRange: '24h',
@@ -1170,6 +1174,211 @@ document.addEventListener('alpine:init', () => {
     },
     graphFit() {
       if (this._cy) { this._cy.fit(); }
+    },
+
+    // ── Entity Graph ───────────────────────────────────────────────────────
+    async loadEntityGraph() {
+      this.entityGraphStatus = 'Loading entity graph…';
+      try {
+        // Get MCP info first to find the MCP endpoint
+        const mcpInfo = await this.apiCall('/api/admin/mcp-info');
+        const mcpURL = mcpInfo.url || 'http://localhost:8750/mcp';
+
+        // Call muninn_export_graph via MCP
+        const mcpRequest = {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: {
+            name: 'muninn_export_graph',
+            arguments: {
+              vault: this.vault,
+              format: 'json-ld',
+              include_engrams: true
+            }
+          }
+        };
+
+        const resp = await fetch(mcpURL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(mcpRequest)
+        });
+
+        if (!resp.ok) {
+          const text = await resp.text().catch(() => resp.statusText);
+          throw new Error('MCP error: ' + resp.status + ' ' + text);
+        }
+
+        const json = await resp.json();
+        if (json.error) {
+          throw new Error('MCP error: ' + json.error.message);
+        }
+
+        // Parse the result
+        const result = JSON.parse(json.result.content[0].text);
+        const data = JSON.parse(result.data);
+        const graph = data['@graph'] || [];
+
+        // Extract nodes and edges from JSON-LD
+        const nodes = [];
+        const edges = [];
+        const nodeIdSet = new Set();
+
+        graph.forEach(item => {
+          if (item['@type'] === 'muninn:Entity') {
+            const entityId = item['@id'] || '';
+            const entityName = item.name || entityId.replace('muninn:entity/', '');
+            const entityType = (item['muninn:entityType'] || 'other').toLowerCase();
+
+            nodeIdSet.add(entityId);
+            nodes.push({
+              id: entityId,
+              label: entityName,
+              title: entityName + ' (' + entityType + ')',
+              shape: 'dot',
+              size: 16,
+              color: this.getEntityTypeColor(entityType),
+              font: { size: 11, color: '#e2e8f0' },
+              borderWidth: 2,
+              borderWidthSelected: 3,
+              borderColor: 'rgba(255,255,255,0.2)'
+            });
+          } else if (item['@type'] === 'muninn:Relationship') {
+            const from = item['muninn:from'] || '';
+            const to = item['muninn:to'] || '';
+            const relType = item['muninn:relType'] || '';
+            const weight = item['muninn:weight'] || 0.5;
+
+            if (nodeIdSet.has(from) && nodeIdSet.has(to)) {
+              edges.push({
+                from: from,
+                to: to,
+                label: relType,
+                arrows: 'to',
+                color: 'rgba(168,85,247,0.4)',
+                font: { size: 10, color: '#ccc' },
+                width: Math.max(1, weight * 3),
+                smooth: { type: 'continuous' }
+              });
+            }
+          }
+        });
+
+        if (nodes.length === 0) {
+          this.entityGraphStatus = 'No entities found in vault';
+          return;
+        }
+
+        // Reinit or destroy existing graph
+        if (this._entityCy) { this._entityCy.destroy(); this._entityCy = null; }
+
+        // Create vis.Network-style data structure for Cytoscape
+        const elements = nodes.concat(edges);
+
+        this._entityCy = cytoscape({
+          container: document.getElementById('entity-cy'),
+          elements: elements,
+          style: [
+            {
+              selector: 'node',
+              style: {
+                'background-color': 'data(color)',
+                'width': 'data(size)',
+                'height': 'data(size)',
+                'label': 'data(label)',
+                'color': 'data(font.color)',
+                'font-size': 'data(font.size)',
+                'text-valign': 'center',
+                'text-halign': 'center',
+                'border-width': 'data(borderWidth)',
+                'border-color': 'data(borderColor)',
+                'text-background': true,
+                'text-background-color': 'rgba(0,0,0,0.5)',
+                'text-background-padding': '2px',
+                'text-background-shape': 'roundrectangle',
+                'text-wrap': 'wrap',
+                'text-max-width': '80px'
+              }
+            },
+            {
+              selector: 'node:selected',
+              style: {
+                'border-width': 'data(borderWidthSelected)',
+                'border-color': '#06b6d4'
+              }
+            },
+            {
+              selector: 'edge',
+              style: {
+                'line-color': 'data(color)',
+                'width': 'data(width)',
+                'curve-style': 'bezier',
+                'opacity': 0.7,
+                'label': 'data(label)',
+                'color': 'data(font.color)',
+                'font-size': 'data(font.size)',
+                'text-background': true,
+                'text-background-color': 'rgba(0,0,0,0.5)',
+                'text-background-padding': '2px',
+                'text-background-shape': 'roundrectangle'
+              }
+            }
+          ],
+          layout: {
+            name: 'fcose',
+            animate: true,
+            animationDuration: 600,
+            animationEasing: 'ease-out'
+          },
+          wheelSensitivity: 0.3
+        });
+
+        // Add click handler to show entity info
+        this._entityCy.on('tap', 'node', (evt) => {
+          const node = evt.target;
+          this.addNotification('info', node.data('label') + ' (' + node.data('id').replace('muninn:entity/', '') + ')');
+        });
+
+        this.entityGraphLoaded = true;
+        this.entityGraphStatus = 'Loaded ' + nodes.length + ' entities, ' + edges.length + ' relationships';
+        this.addNotification('success', this.entityGraphStatus);
+      } catch (err) {
+        this.entityGraphStatus = 'Error: ' + err.message;
+        this.addNotification('error', 'Entity graph failed: ' + err.message);
+      }
+    },
+
+    getEntityTypeColor(entityType) {
+      const colors = {
+        'person': '#3b82f6',           // blue
+        'organization': '#8b5cf6',     // purple
+        'technology': '#10b981',       // emerald
+        'project': '#f59e0b',          // amber
+        'location': '#ec4899',         // pink
+        'concept': '#6366f1',          // indigo
+        'tool': '#14b8a6',             // teal
+        'database': '#8b5cf6',         // purple
+        'service': '#06b6d4',          // cyan
+        'framework': '#10b981',        // emerald
+        'language': '#f59e0b',         // amber
+        'product': '#ef4444',          // red
+        'event': '#84cc16',            // lime
+        'other': '#64748b'             // slate
+      };
+      return colors[entityType] || colors['other'];
+    },
+
+    entityGraphZoomIn() {
+      if (this._entityCy) { this._entityCy.zoom(this._entityCy.zoom() * 1.25); this._entityCy.center(); }
+    },
+
+    entityGraphZoomOut() {
+      if (this._entityCy) { this._entityCy.zoom(this._entityCy.zoom() * 0.8); this._entityCy.center(); }
+    },
+
+    entityGraphFit() {
+      if (this._entityCy) { this._entityCy.fit(); }
     },
 
     // ── Session ────────────────────────────────────────────────────────────
