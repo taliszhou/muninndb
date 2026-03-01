@@ -46,6 +46,10 @@ func allToolDefinitions() []ToolDefinition {
 						"required": []string{"target_id", "relation"},
 					},
 				},
+				"op_id": map[string]any{
+					"type":        "string",
+					"description": "Optional idempotency key. If set and a receipt exists for this key, the cached engram ID is returned without re-creating.",
+				},
 			},
 			"required": []string{"content"},
 		},

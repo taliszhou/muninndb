@@ -281,6 +281,14 @@ func (a *mcpEngineAdapter) FindByEntity(ctx context.Context, vault, entityName s
 	return a.eng.FindByEntity(ctx, vault, entityName, limit)
 }
 
+func (a *mcpEngineAdapter) CheckIdempotency(ctx context.Context, opID string) (*storage.IdempotencyReceipt, error) {
+	return a.eng.Store().CheckIdempotency(ctx, opID)
+}
+
+func (a *mcpEngineAdapter) WriteIdempotency(ctx context.Context, opID, engramID string) error {
+	return a.eng.Store().WriteIdempotency(ctx, opID, engramID)
+}
+
 func (a *mcpEngineAdapter) WhereLeftOff(ctx context.Context, vault string, limit int) ([]WhereLeftOffEntry, error) {
 	engrams, err := a.eng.WhereLeftOff(ctx, vault, limit)
 	if err != nil {

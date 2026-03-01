@@ -15,6 +15,18 @@ import (
 )
 
 func (s *MCPServer) handleRemember(ctx context.Context, w http.ResponseWriter, id json.RawMessage, vault string, args map[string]any) {
+	opID, _ := args["op_id"].(string)
+	if opID != "" {
+		if receipt, err := s.engine.CheckIdempotency(ctx, opID); err == nil && receipt != nil {
+			out, _ := json.Marshal(map[string]any{
+				"id":         receipt.EngramID,
+				"idempotent": true,
+			})
+			sendResult(w, id, textContent(string(out)))
+			return
+		}
+	}
+
 	content, ok := args["content"].(string)
 	if !ok || content == "" {
 		sendError(w, id, -32602, "invalid params: 'content' is required")
@@ -60,6 +72,9 @@ func (s *MCPServer) handleRemember(ctx context.Context, w http.ResponseWriter, i
 	if err != nil {
 		sendError(w, id, -32000, "tool error: "+err.Error())
 		return
+	}
+	if opID != "" {
+		_ = s.engine.WriteIdempotency(ctx, opID, resp.ID)
 	}
 	result := WriteResult{ID: resp.ID}
 	if len(content) > 500 {

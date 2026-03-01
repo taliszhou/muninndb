@@ -623,3 +623,15 @@ func LastAccessIndexPrefix(ws [8]byte) []byte {
 	copy(key[1:9], ws[:])
 	return key
 }
+
+// IdempotencyKey constructs the global idempotency receipt key (0x19 prefix).
+// Uses SipHash of the op_id string (same SipHash params as EntityNameHash).
+// Key: 0x19 | siphash(op_id)(8) = 9 bytes
+// Value: JSON {"engram_id": "...", "created_at": unix_nanos}
+func IdempotencyKey(opID string) []byte {
+	hashVal := siphash.Hash(sipKey0, sipKey1, []byte(opID))
+	key := make([]byte, 1+8)
+	key[0] = 0x19
+	binary.BigEndian.PutUint64(key[1:], hashVal)
+	return key
+}

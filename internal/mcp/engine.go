@@ -89,4 +89,10 @@ type EngineInterface interface {
 	// FindByEntity returns all engrams that mention the given entity name,
 	// scanned from the 0x23 reverse index. Results are limited to limit entries.
 	FindByEntity(ctx context.Context, vault, entityName string, limit int) ([]*storage.Engram, error)
+
+	// CheckIdempotency looks up an op_id receipt. Returns nil, nil if not found.
+	CheckIdempotency(ctx context.Context, opID string) (*storage.IdempotencyReceipt, error)
+
+	// WriteIdempotency stores an idempotency receipt (op_id → engramID).
+	WriteIdempotency(ctx context.Context, opID, engramID string) error
 }

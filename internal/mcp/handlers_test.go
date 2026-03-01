@@ -145,6 +145,27 @@ func (e *noPluginsEngine) RetryEnrich(_ context.Context, _ string, id string) (*
 	}, nil
 }
 
+// idempotentEngine is a fake engine that records Write calls and supports
+// configurable CheckIdempotency responses for testing the op_id path.
+type idempotentEngine struct {
+	fakeEngine
+	receipt   *storage.IdempotencyReceipt // non-nil → return this on CheckIdempotency
+	writeCalls int
+}
+
+func (e *idempotentEngine) CheckIdempotency(_ context.Context, _ string) (*storage.IdempotencyReceipt, error) {
+	return e.receipt, nil
+}
+
+func (e *idempotentEngine) WriteIdempotency(_ context.Context, _, _ string) error {
+	return nil
+}
+
+func (e *idempotentEngine) Write(_ context.Context, _ *mbp.WriteRequest) (*mbp.WriteResponse, error) {
+	e.writeCalls++
+	return &mbp.WriteResponse{ID: "fresh-id"}, nil
+}
+
 // limitTrackingEngine records the limit value received by ListDeleted.
 type limitTrackingEngine struct {
 	fakeEngine
@@ -1227,5 +1248,90 @@ func TestHandleWhereLeftOff_LimitCapped(t *testing.T) {
 	postRPC(t, srv, body)
 	if eng.lastLimit != 50 {
 		t.Errorf("expected limit capped to 50, got %d", eng.lastLimit)
+	}
+}
+
+// ── op_id idempotency ─────────────────────────────────────────────────────────
+
+// TestHandleRemember_IdempotentHit verifies that when CheckIdempotency finds a
+// receipt for the given op_id, the cached engram ID is returned immediately
+// with "idempotent":true and the engine's Write method is NOT called.
+func TestHandleRemember_IdempotentHit(t *testing.T) {
+	eng := &idempotentEngine{
+		receipt: &storage.IdempotencyReceipt{EngramID: "cached-id-abc", CreatedAt: 1000000},
+	}
+	srv := newTestServerWith(eng)
+
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_remember","arguments":{"vault":"default","content":"hello world","op_id":"my-unique-op"}}}`
+	w := postRPC(t, srv, body)
+
+	resp := decodeResp(t, w.Body.String())
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+
+	content := extractInnerJSON(t, resp)
+
+	id, ok := content["id"].(string)
+	if !ok || id != "cached-id-abc" {
+		t.Errorf("expected id='cached-id-abc', got %v", content["id"])
+	}
+
+	idempotent, ok := content["idempotent"].(bool)
+	if !ok || !idempotent {
+		t.Errorf("expected idempotent=true, got %v", content["idempotent"])
+	}
+
+	if eng.writeCalls != 0 {
+		t.Errorf("expected Write to not be called on idempotent hit, got %d calls", eng.writeCalls)
+	}
+}
+
+// TestHandleRemember_IdempotentMiss verifies that when no receipt exists for
+// the op_id, the Write proceeds normally and returns a fresh engram ID.
+func TestHandleRemember_IdempotentMiss(t *testing.T) {
+	eng := &idempotentEngine{receipt: nil} // no existing receipt
+	srv := newTestServerWith(eng)
+
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_remember","arguments":{"vault":"default","content":"new content","op_id":"new-unique-op"}}}`
+	w := postRPC(t, srv, body)
+
+	resp := decodeResp(t, w.Body.String())
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+
+	content := extractInnerJSON(t, resp)
+
+	id, ok := content["id"].(string)
+	if !ok || id != "fresh-id" {
+		t.Errorf("expected id='fresh-id', got %v", content["id"])
+	}
+
+	if _, hasIdempotent := content["idempotent"]; hasIdempotent {
+		t.Error("expected no 'idempotent' field on a fresh write")
+	}
+
+	if eng.writeCalls != 1 {
+		t.Errorf("expected Write to be called once, got %d", eng.writeCalls)
+	}
+}
+
+// TestHandleRemember_NoOpID verifies that muninn_remember without op_id
+// behaves exactly as before — no idempotency check is performed.
+func TestHandleRemember_NoOpID(t *testing.T) {
+	eng := &idempotentEngine{receipt: nil}
+	srv := newTestServerWith(eng)
+
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_remember","arguments":{"vault":"default","content":"plain memory"}}}`
+	w := postRPC(t, srv, body)
+
+	resp := decodeResp(t, w.Body.String())
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+
+	if eng.writeCalls != 1 {
+		t.Errorf("expected Write to be called once, got %d", eng.writeCalls)
 	}
 }

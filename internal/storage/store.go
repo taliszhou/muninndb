@@ -199,6 +199,12 @@ type EngineStore interface {
 	// DeleteLastAccessEntry removes the 0x22 index entry for a deleted engram.
 	DeleteLastAccessEntry(ctx context.Context, ws [8]byte, id ULID, lastAccessMillis int64) error
 
+	// CheckIdempotency looks up an op_id receipt. Returns nil, nil if not found.
+	CheckIdempotency(ctx context.Context, opID string) (*IdempotencyReceipt, error)
+
+	// WriteIdempotency stores an idempotency receipt (op_id → engramID).
+	WriteIdempotency(ctx context.Context, opID, engramID string) error
+
 	// Close flushes all pending writes and closes the Pebble database.
 	Close() error
 }
