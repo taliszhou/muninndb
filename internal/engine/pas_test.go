@@ -41,7 +41,7 @@ func testPASEnv(t *testing.T) (*Engine, func()) {
 
 	eng := NewEngine(store, authStore, ftsIdx, actEngine, trigSystem, nil, nil, nil, embedder, nil)
 
-	tw := cognitive.NewTransitionWorker(store.TransitionCache())
+	tw := cognitive.NewTransitionWorker(context.Background(), store.TransitionCache())
 	eng.SetTransitionWorker(tw)
 
 	// Configure the test vault with PAS enabled.
@@ -131,7 +131,7 @@ func TestPAS_TransitionRecording(t *testing.T) {
 	tw := eng.transitionWorker
 	tw.Stop()
 	// Restart for subsequent operations.
-	newTw := cognitive.NewTransitionWorker(eng.store.TransitionCache())
+	newTw := cognitive.NewTransitionWorker(context.Background(), eng.store.TransitionCache())
 	eng.SetTransitionWorker(newTw)
 	defer newTw.Stop()
 
@@ -204,7 +204,7 @@ func TestPAS_TransitionBoostInScoreComponents(t *testing.T) {
 	// Force-flush the transition worker to ensure all transitions are processed.
 	tw2 := eng.transitionWorker
 	tw2.Stop()
-	newTw2 := cognitive.NewTransitionWorker(eng.store.TransitionCache())
+	newTw2 := cognitive.NewTransitionWorker(context.Background(), eng.store.TransitionCache())
 	eng.SetTransitionWorker(newTw2)
 	defer newTw2.Stop()
 

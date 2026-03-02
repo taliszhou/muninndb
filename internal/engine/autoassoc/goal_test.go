@@ -34,7 +34,7 @@ func TestGoalLinkWorker_EnqueuesAndProcesses(t *testing.T) {
 			{ID: [16]byte{2}, Score: 0.5}, // below threshold — should be skipped
 		},
 	}
-	w := NewGoalLinkWorker(store, hnswIdx)
+	w := NewGoalLinkWorker(context.Background(), store, hnswIdx)
 	var ws [8]byte
 	var id [16]byte
 	id[0] = 99
@@ -53,7 +53,7 @@ func TestGoalLinkWorker_DropsSelfLink(t *testing.T) {
 	hnswIdx := &fakeGoalHNSW{
 		results: []hnsw.ScoredID{{ID: id, Score: 0.9}}, // same ID as job
 	}
-	w := NewGoalLinkWorker(store, hnswIdx)
+	w := NewGoalLinkWorker(context.Background(), store, hnswIdx)
 	w.EnqueueGoalJob(GoalJob{WS: [8]byte{}, ID: id, Embedding: []float32{0.1}})
 	w.Stop()
 	if store.written != 0 {
@@ -64,7 +64,7 @@ func TestGoalLinkWorker_DropsSelfLink(t *testing.T) {
 func TestGoalLinkWorker_NilHNSW(t *testing.T) {
 	store := &fakeGoalStore{}
 	// Pass nil HNSW — process() must not panic
-	w := NewGoalLinkWorker(store, nil)
+	w := NewGoalLinkWorker(context.Background(), store, nil)
 	var id [16]byte
 	id[0] = 7
 	w.EnqueueGoalJob(GoalJob{WS: [8]byte{}, ID: id, Embedding: []float32{0.1}})
@@ -82,7 +82,7 @@ func TestGoalLinkWorker_CapsAtMaxGoalLinks(t *testing.T) {
 		results[i] = hnsw.ScoredID{ID: [16]byte{byte(i + 1)}, Score: 0.9}
 	}
 	hnswIdx := &fakeGoalHNSW{results: results}
-	w := NewGoalLinkWorker(store, hnswIdx)
+	w := NewGoalLinkWorker(context.Background(), store, hnswIdx)
 	var id [16]byte // zero ID — distinct from all result IDs (which start at 1)
 	w.EnqueueGoalJob(GoalJob{WS: [8]byte{}, ID: id, Embedding: []float32{0.1}})
 	w.Stop()
@@ -92,7 +92,7 @@ func TestGoalLinkWorker_CapsAtMaxGoalLinks(t *testing.T) {
 }
 
 func TestGoalLinkWorker_Stop(t *testing.T) {
-	w := NewGoalLinkWorker(&fakeGoalStore{}, &fakeGoalHNSW{})
+	w := NewGoalLinkWorker(context.Background(), &fakeGoalStore{}, &fakeGoalHNSW{})
 	done := make(chan struct{})
 	go func() {
 		w.Stop()

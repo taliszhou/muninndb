@@ -35,17 +35,19 @@ type TransitionCacheStore interface {
 // It follows the same lifecycle pattern as HebbianWorker.
 type TransitionWorker struct {
 	*Worker[TransitionEvent]
-	store  TransitionCacheStore
-	stopCh chan struct{}
-	doneCh chan struct{}
+	store   TransitionCacheStore
+	stopCh  chan struct{}
+	doneCh  chan struct{}
+	stopCtx context.Context
 }
 
 // NewTransitionWorker creates and starts a new TransitionWorker.
-func NewTransitionWorker(store TransitionCacheStore) *TransitionWorker {
+func NewTransitionWorker(ctx context.Context, store TransitionCacheStore) *TransitionWorker {
 	tw := &TransitionWorker{
-		store:  store,
-		stopCh: make(chan struct{}),
-		doneCh: make(chan struct{}),
+		store:   store,
+		stopCh:  make(chan struct{}),
+		doneCh:  make(chan struct{}),
+		stopCtx: ctx,
 	}
 
 	tw.Worker = NewWorker[TransitionEvent](
@@ -54,7 +56,7 @@ func NewTransitionWorker(store TransitionCacheStore) *TransitionWorker {
 	)
 	go func() {
 		defer close(tw.doneCh)
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(tw.stopCtx)
 		go func() {
 			<-tw.stopCh
 			cancel()

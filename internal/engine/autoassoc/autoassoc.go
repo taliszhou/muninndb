@@ -65,16 +65,18 @@ type Worker struct {
 	fts     FTSIndex
 	metrics *Metrics
 	wg      sync.WaitGroup
+	stopCtx context.Context
 }
 
 // New creates a new Worker and starts NumWorkers goroutines.
 // Call Stop() to drain the queue and shut down cleanly.
-func New(store Store, fts FTSIndex) *Worker {
+func New(ctx context.Context, store Store, fts FTSIndex) *Worker {
 	w := &Worker{
 		jobs:    make(chan Job, JobBufSize),
 		store:   store,
 		fts:     fts,
 		metrics: &Metrics{},
+		stopCtx: ctx,
 	}
 	for i := 0; i < NumWorkers; i++ {
 		w.wg.Add(1)
@@ -113,7 +115,7 @@ func (w *Worker) GetMetrics() (enqueued, completed, dropped, errors int64) {
 func (w *Worker) run() {
 	defer w.wg.Done()
 	for job := range w.jobs {
-		ctx, cancel := context.WithTimeout(context.Background(), JobTimeout)
+		ctx, cancel := context.WithTimeout(w.stopCtx, JobTimeout)
 		if err := w.processJob(ctx, job); err != nil {
 			w.metrics.Errors.Add(1)
 			slog.Warn("autoassoc job failed", "err", err)

@@ -1,6 +1,7 @@
 package cognitive
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -44,7 +45,7 @@ func (m *mockTransitionCache) totalPairs() int {
 
 func TestTransitionWorker_ProcessesEvents(t *testing.T) {
 	mock := newMockTransitionCache()
-	tw := NewTransitionWorker(mock)
+	tw := NewTransitionWorker(context.Background(), mock)
 
 	var ws [8]byte
 	ws[0] = 0x01
@@ -84,7 +85,7 @@ func TestTransitionWorker_ProcessesEvents(t *testing.T) {
 
 func TestTransitionWorker_SkipsSelfTransitions(t *testing.T) {
 	mock := newMockTransitionCache()
-	tw := NewTransitionWorker(mock)
+	tw := NewTransitionWorker(context.Background(), mock)
 
 	var ws [8]byte
 	sameID := [16]byte{5}
@@ -105,7 +106,7 @@ func TestTransitionWorker_SkipsSelfTransitions(t *testing.T) {
 
 func TestTransitionWorker_AggregatesDuplicates(t *testing.T) {
 	mock := newMockTransitionCache()
-	tw := NewTransitionWorker(mock)
+	tw := NewTransitionWorker(context.Background(), mock)
 
 	var ws [8]byte
 	src := [16]byte{10}
@@ -130,7 +131,7 @@ func TestTransitionWorker_AggregatesDuplicates(t *testing.T) {
 
 func TestTransitionWorker_StopDrainsPending(t *testing.T) {
 	mock := newMockTransitionCache()
-	tw := NewTransitionWorker(mock)
+	tw := NewTransitionWorker(context.Background(), mock)
 
 	var ws [8]byte
 	for i := 0; i < 50; i++ {

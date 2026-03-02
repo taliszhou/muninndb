@@ -69,7 +69,7 @@ func TestProcessNeighborJob_NilEmbedding(t *testing.T) {
 		{ID: [16]byte(storage.NewULID()), Score: 0.9},
 	}}
 
-	w := autoassoc.NewNeighborWorker(store, idx)
+	w := autoassoc.NewNeighborWorker(context.Background(), store, idx)
 
 	w.EnqueueNeighborJob(autoassoc.NeighborJob{
 		WS:        [8]byte{},
@@ -107,7 +107,7 @@ func TestProcessNeighborJob_ThresholdBoundary(t *testing.T) {
 				{ID: neighborID, Score: tc.score},
 			}}
 
-			w := autoassoc.NewNeighborWorker(store, idx)
+			w := autoassoc.NewNeighborWorker(context.Background(), store, idx)
 
 			w.EnqueueNeighborJob(autoassoc.NeighborJob{
 				WS:        [8]byte{},
@@ -135,7 +135,7 @@ func TestProcessNeighborJob_SkipsSelfLink(t *testing.T) {
 		{ID: selfID, Score: 0.9},
 	}}
 
-	w := autoassoc.NewNeighborWorker(store, idx)
+	w := autoassoc.NewNeighborWorker(context.Background(), store, idx)
 
 	w.EnqueueNeighborJob(autoassoc.NeighborJob{
 		WS:        [8]byte{},
@@ -159,7 +159,7 @@ func TestProcessNeighborJob_WeightCapped(t *testing.T) {
 			{ID: [16]byte(storage.NewULID()), Score: 1.0},
 		}}
 
-		w := autoassoc.NewNeighborWorker(store, idx)
+		w := autoassoc.NewNeighborWorker(context.Background(), store, idx)
 
 		w.EnqueueNeighborJob(autoassoc.NeighborJob{
 			WS:        [8]byte{},
@@ -185,7 +185,7 @@ func TestProcessNeighborJob_WeightCapped(t *testing.T) {
 			{ID: [16]byte(storage.NewULID()), Score: 0.8},
 		}}
 
-		w := autoassoc.NewNeighborWorker(store, idx)
+		w := autoassoc.NewNeighborWorker(context.Background(), store, idx)
 
 		w.EnqueueNeighborJob(autoassoc.NeighborJob{
 			WS:        [8]byte{},
@@ -214,7 +214,7 @@ func TestEnqueueNeighborJob_QueueFullNoPanic(t *testing.T) {
 	idx := &blockingHNSW{block: blockCh}
 	store := &mockStore{}
 
-	w := autoassoc.NewNeighborWorker(store, idx)
+	w := autoassoc.NewNeighborWorker(context.Background(), store, idx)
 	defer func() {
 		close(blockCh)
 		w.Stop()
@@ -264,7 +264,7 @@ func TestProcessNeighborJob_MultipleNeighbors(t *testing.T) {
 		{ID: idC, Score: 0.8}, // qualifies
 	}}
 
-	w := autoassoc.NewNeighborWorker(store, idx)
+	w := autoassoc.NewNeighborWorker(context.Background(), store, idx)
 
 	w.EnqueueNeighborJob(autoassoc.NeighborJob{
 		WS:        [8]byte{},

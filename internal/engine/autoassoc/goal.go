@@ -41,19 +41,21 @@ type GoalHNSW interface {
 // For each new TypeGoal engram, it queries HNSW for topK=5 neighbors with
 // cosine similarity >= 0.6 and creates RelSupports associations.
 type GoalLinkWorker struct {
-	jobs  chan GoalJob
-	store GoalStore
-	hnsw  GoalHNSW
-	wg    sync.WaitGroup
+	jobs    chan GoalJob
+	store   GoalStore
+	hnsw    GoalHNSW
+	wg      sync.WaitGroup
+	stopCtx context.Context
 }
 
 // NewGoalLinkWorker creates a new GoalLinkWorker and starts a single worker goroutine.
 // Call Stop() to drain the queue and shut down cleanly.
-func NewGoalLinkWorker(store GoalStore, hnswIdx GoalHNSW) *GoalLinkWorker {
+func NewGoalLinkWorker(ctx context.Context, store GoalStore, hnswIdx GoalHNSW) *GoalLinkWorker {
 	w := &GoalLinkWorker{
-		jobs:  make(chan GoalJob, goalBufSize),
-		store: store,
-		hnsw:  hnswIdx,
+		jobs:    make(chan GoalJob, goalBufSize),
+		store:   store,
+		hnsw:    hnswIdx,
+		stopCtx: ctx,
 	}
 	w.wg.Add(1)
 	go w.run()
@@ -88,7 +90,7 @@ func (w *GoalLinkWorker) process(job GoalJob) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), goalJobTimeout)
+	ctx, cancel := context.WithTimeout(w.stopCtx, goalJobTimeout)
 	defer cancel()
 
 	neighbors, err := w.hnsw.Search(ctx, job.WS, job.Embedding, goalTopK)

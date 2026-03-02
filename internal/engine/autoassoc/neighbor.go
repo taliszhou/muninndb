@@ -56,17 +56,19 @@ type NeighborWorker struct {
 	hnsw    NeighborHNSW
 	metrics *NeighborMetrics
 	wg      sync.WaitGroup
+	stopCtx context.Context
 }
 
 // NewNeighborWorker creates a new NeighborWorker and starts worker goroutines.
 // Call Stop() to drain the queue and shut down cleanly.
-func NewNeighborWorker(store NeighborStore, hnsw NeighborHNSW) *NeighborWorker {
+func NewNeighborWorker(ctx context.Context, store NeighborStore, hnsw NeighborHNSW) *NeighborWorker {
 	numWorkers := runtime.NumCPU()
 	w := &NeighborWorker{
 		jobs:    make(chan NeighborJob, neighborBufSize),
 		store:   store,
 		hnsw:    hnsw,
 		metrics: &NeighborMetrics{},
+		stopCtx: ctx,
 	}
 	for i := 0; i < numWorkers; i++ {
 		w.wg.Add(1)
@@ -110,7 +112,7 @@ func (w *NeighborWorker) GetNeighborMetrics() (enqueued, completed, dropped, err
 func (w *NeighborWorker) run() {
 	defer w.wg.Done()
 	for job := range w.jobs {
-		ctx, cancel := context.WithTimeout(context.Background(), neighborJobTimeout)
+		ctx, cancel := context.WithTimeout(w.stopCtx, neighborJobTimeout)
 		if err := w.processNeighborJob(ctx, job); err != nil {
 			w.metrics.Errors.Add(1)
 			slog.Warn("neighbor worker job failed", "err", err)

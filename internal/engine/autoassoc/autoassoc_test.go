@@ -79,7 +79,7 @@ func TestWorkerCreatesLinksForMatchingTags(t *testing.T) {
 		},
 	}
 
-	w := New(store, ftsIdx)
+	w := New(context.Background(), store, ftsIdx)
 	defer w.Stop()
 
 	w.Enqueue(Job{
@@ -105,7 +105,7 @@ func TestWorkerExcludesSelf(t *testing.T) {
 		},
 	}
 
-	w := New(store, ftsIdx)
+	w := New(context.Background(), store, ftsIdx)
 	defer w.Stop()
 
 	w.Enqueue(Job{
@@ -125,7 +125,7 @@ func TestWorkerNoTagsNoLinks(t *testing.T) {
 	store := &stubStore{}
 	ftsIdx := &stubFTS{results: map[string][]fts.ScoredID{}}
 
-	w := New(store, ftsIdx)
+	w := New(context.Background(), store, ftsIdx)
 	defer w.Stop()
 
 	w.Enqueue(Job{
@@ -151,7 +151,7 @@ func TestWorkerMaxAssociationsCap(t *testing.T) {
 	store := &stubStore{}
 	ftsIdx := &stubFTS{results: map[string][]fts.ScoredID{"tag": results}}
 
-	w := New(store, ftsIdx)
+	w := New(context.Background(), store, ftsIdx)
 	defer w.Stop()
 
 	w.Enqueue(Job{
@@ -174,7 +174,7 @@ func TestWorkerDropsJobsWhenQueueFull(t *testing.T) {
 	var callCount atomic.Int64
 
 	slowFTS := &slowFTSStub{block: blockCh, counter: &callCount}
-	w := New(store, slowFTS)
+	w := New(context.Background(), store, slowFTS)
 	defer func() {
 		close(blockCh)
 		w.Stop()
@@ -199,7 +199,7 @@ func TestWorkerFTSErrorIsNonFatal(t *testing.T) {
 	store := &stubStore{}
 	ftsIdx := &stubFTS{err: errors.New("index error")}
 
-	w := New(store, ftsIdx)
+	w := New(context.Background(), store, ftsIdx)
 	defer w.Stop()
 
 	w.Enqueue(Job{
@@ -225,7 +225,7 @@ func TestWorkerStoreErrorIsNonFatal(t *testing.T) {
 		},
 	}
 
-	w := New(store, ftsIdx)
+	w := New(context.Background(), store, ftsIdx)
 	defer w.Stop()
 
 	w.Enqueue(Job{WSPrefix: [8]byte{}, NewID: id, Tags: []string{"tag"}})
@@ -238,7 +238,7 @@ func TestWorkerMetricsAccurate(t *testing.T) {
 	store := &stubStore{}
 	ftsIdx := &stubFTS{results: map[string][]fts.ScoredID{}}
 
-	w := New(store, ftsIdx)
+	w := New(context.Background(), store, ftsIdx)
 	defer w.Stop()
 
 	const n = 5
