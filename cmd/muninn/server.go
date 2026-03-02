@@ -598,6 +598,7 @@ func runServer() {
 	// migRunner.Register(migrate.Migration{Version: 1, Description: "...", Up: func(db *pebble.DB) error { ... }})
 	if applied, err := migRunner.Run(); err != nil {
 		slog.Error("migration failed", "err", err)
+		db.Close()
 		os.Exit(1)
 	} else if applied > 0 {
 		slog.Info("migrations applied", "count", applied)

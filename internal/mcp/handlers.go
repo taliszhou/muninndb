@@ -39,7 +39,7 @@ func (s *MCPServer) handleRemember(ctx context.Context, w http.ResponseWriter, i
 	}
 
 	content, ok := args["content"].(string)
-	if !ok || content == "" {
+	if !ok || strings.TrimSpace(content) == "" {
 		sendError(w, id, -32602, "invalid params: 'content' is required")
 		return
 	}
@@ -113,7 +113,7 @@ func (s *MCPServer) handleRememberBatch(ctx context.Context, w http.ResponseWrit
 			return
 		}
 		content, ok := m["content"].(string)
-		if !ok || content == "" {
+		if !ok || strings.TrimSpace(content) == "" {
 			sendError(w, id, -32602, fmt.Sprintf("invalid params: memories[%d].content is required", i))
 			return
 		}
@@ -515,6 +515,9 @@ func (s *MCPServer) handleTraverse(ctx context.Context, w http.ResponseWriter, i
 	}
 	maxHops := 2
 	if v, ok := args["max_hops"].(float64); ok {
+		if v < 0 {
+			v = 0
+		}
 		maxHops = int(v)
 	}
 	if maxHops > 5 {
@@ -522,6 +525,9 @@ func (s *MCPServer) handleTraverse(ctx context.Context, w http.ResponseWriter, i
 	}
 	maxNodes := 20
 	if v, ok := args["max_nodes"].(float64); ok {
+		if v < 0 {
+			v = 0
+		}
 		maxNodes = int(v)
 	}
 	if maxNodes > 100 {
@@ -620,6 +626,9 @@ func (s *MCPServer) handleState(ctx context.Context, w http.ResponseWriter, id j
 func (s *MCPServer) handleListDeleted(ctx context.Context, w http.ResponseWriter, id json.RawMessage, vault string, args map[string]any) {
 	limit := 20
 	if v, ok := args["limit"].(float64); ok {
+		if v < 0 {
+			v = 0
+		}
 		limit = int(v)
 	}
 	if limit > 100 {
@@ -900,6 +909,9 @@ func (s *MCPServer) handleAddChild(ctx context.Context, w http.ResponseWriter, i
 func (s *MCPServer) handleEntityClusters(ctx context.Context, w http.ResponseWriter, id json.RawMessage, vault string, args map[string]any) {
 	minCount := 2
 	if v, ok := args["min_count"].(float64); ok {
+		if v < 0 {
+			v = 0
+		}
 		minCount = int(v)
 	}
 	if minCount < 1 {
@@ -907,6 +919,9 @@ func (s *MCPServer) handleEntityClusters(ctx context.Context, w http.ResponseWri
 	}
 	topN := 20
 	if v, ok := args["top_n"].(float64); ok {
+		if v < 0 {
+			v = 0
+		}
 		topN = int(v)
 	}
 	if topN < 1 {
@@ -1132,6 +1147,9 @@ func (s *MCPServer) handleSimilarEntities(ctx context.Context, w http.ResponseWr
 	}
 	topN := 20
 	if v, ok := args["top_n"].(float64); ok {
+		if v < 0 {
+			v = 0
+		}
 		topN = int(v)
 	}
 	if topN < 1 {
@@ -1229,6 +1247,9 @@ func (s *MCPServer) handleReplayEnrichment(ctx context.Context, w http.ResponseW
 	// Parse limit (optional, default 50, max 200).
 	limit := 50
 	if v, ok := args["limit"].(float64); ok {
+		if v < 0 {
+			v = 0
+		}
 		limit = int(v)
 	}
 	if limit < 1 {
