@@ -261,6 +261,14 @@ func NewEngine(
 	_ = store.BackfillVaultNames()
 
 	// T1: Wire cognitive callbacks to trigger system.
+	// Initialization order note: HebbianWorker's background goroutine is already running
+	// at this point (it auto-starts inside NewHebbianWorkerWithDB). Setting OnWeightUpdate
+	// here is safe because NewEngine has not returned yet — no caller can enqueue a
+	// CoActivationEvent through the engine API before this assignment completes.
+	// The dynamic Cortex-promotion path (SetCognitiveWorkers) sets the callback before
+	// publishing the worker reference, giving the same guarantee for hot-swap scenarios.
+	// For an even stronger guarantee, pass the callback directly to NewHebbianWorkerWithDB
+	// so it is set before the goroutine starts.
 	if e.hebbianWorker != nil && e.triggers != nil {
 		e.hebbianWorker.OnWeightUpdate = func(ws [8]byte, id [16]byte, field string, old, new float64) {
 			vaultID := wsVaultID(ws)

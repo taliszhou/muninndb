@@ -83,18 +83,36 @@ type HebbianWorker struct {
 	doneCh chan struct{}
 }
 
-// NewHebbianWorker creates a new Hebbian worker.
+// NewHebbianWorker creates a new Hebbian worker with no persistence and no callback.
+// Use NewHebbianWorkerWithDB to supply a callback before the background goroutine starts,
+// eliminating the initialization order race described in the field notes below.
 func NewHebbianWorker(store HebbianStore) *HebbianWorker {
-	return NewHebbianWorkerWithDB(store, nil)
+	return NewHebbianWorkerWithDB(store, nil, nil)
 }
 
-// NewHebbianWorkerWithDB creates a new Hebbian worker with optional Pebble persistence.
-func NewHebbianWorkerWithDB(store HebbianStore, db *pebble.DB) *HebbianWorker {
+// NewHebbianWorkerWithDB creates a new Hebbian worker with optional Pebble persistence
+// and an optional OnWeightUpdate callback.
+//
+// Initialization order requirement: the callback is assigned to hw.OnWeightUpdate
+// BEFORE the background goroutine is started. This eliminates the race where the
+// goroutine could process a co-activation event and attempt to call OnWeightUpdate
+// while the caller was still setting it after construction.
+//
+// Callers that previously did:
+//
+//	hw := NewHebbianWorkerWithDB(store, db)
+//	hw.OnWeightUpdate = myCallback   // RACE: goroutine already running
+//
+// should now pass the callback directly:
+//
+//	hw := NewHebbianWorkerWithDB(store, db, myCallback)  // safe: set before goroutine starts
+func NewHebbianWorkerWithDB(store HebbianStore, db *pebble.DB, onWeightUpdate func(ws [8]byte, id [16]byte, field string, oldVal, newVal float64)) *HebbianWorker {
 	hw := &HebbianWorker{
-		store:  store,
-		db:     db,
-		stopCh: make(chan struct{}),
-		doneCh: make(chan struct{}),
+		store:          store,
+		db:             db,
+		OnWeightUpdate: onWeightUpdate, // set BEFORE the background goroutine starts
+		stopCh:         make(chan struct{}),
+		doneCh:         make(chan struct{}),
 	}
 
 	hw.Worker = NewWorker[CoActivationEvent](
@@ -102,6 +120,8 @@ func NewHebbianWorkerWithDB(store HebbianStore, db *pebble.DB) *HebbianWorker {
 		hw.processBatch,
 	)
 	// Start the background run loop automatically.
+	// IMPORTANT: OnWeightUpdate must be assigned before this goroutine starts
+	// (done above) so no event is silently dropped due to a nil callback check.
 	go func() {
 		defer close(hw.doneCh)
 		ctx, cancel := context.WithCancel(context.Background())
