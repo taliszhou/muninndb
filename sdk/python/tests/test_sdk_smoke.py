@@ -9,6 +9,10 @@ Configure the server address with environment variables:
     MUNINNDB_URL   — base URL (default: http://localhost:8476)
     MUNINNDB_TOKEN — bearer token (default: None / no auth)
 
+Note: tests use the "default" vault which is pre-configured as public.
+Other vault names require an API key for GET requests (vault is read from
+?vault= query param by auth middleware, not from the request body).
+
 Run:
     PYTHONPATH=. pytest tests/test_sdk_smoke.py -v
 """
@@ -23,7 +27,7 @@ from muninn.errors import MuninnAuthError, MuninnConnectionError, MuninnError
 
 BASE_URL = os.environ.get("MUNINNDB_URL", "http://localhost:8476")
 TOKEN = os.environ.get("MUNINNDB_TOKEN") or None
-VAULT = "sdk-smoke-test"
+VAULT = "default"
 
 
 @pytest.mark.asyncio
