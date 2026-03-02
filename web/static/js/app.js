@@ -10,6 +10,7 @@ document.addEventListener('alpine:init', () => {
     vaults: ['default'],
     vaultModalOpen: false,
     vaultPickerSearch: '',
+    newVaultModal: { show: false, name: '', error: '', loading: false },
     isDarkMode: localStorage.getItem('muninnTheme') !== 'light',
     liveConnected: false,
     appVersion: '',
@@ -1002,16 +1003,21 @@ document.addEventListener('alpine:init', () => {
     },
 
     // ── Create vault ───────────────────────────────────────────────────────
-    async createVault() {
-      const name = prompt('Enter new vault name (lowercase letters, digits, hyphens, underscores; 1-64 chars):');
+    createVault() {
+      this.newVaultModal = { show: true, name: '', error: '', loading: false };
+    },
+
+    async submitNewVault() {
+      const name = this.newVaultModal.name.trim();
       if (!name) return;
       const valid = /^[a-z0-9_-]{1,64}$/.test(name);
       if (!valid) {
-        this.addNotification('error', 'Vault name must be 1-64 lowercase letters, digits, hyphens, or underscores');
+        this.newVaultModal.error = 'Lowercase letters, digits, hyphens, underscores only (1-64 chars)';
         return;
       }
+      this.newVaultModal.loading = true;
+      this.newVaultModal.error = '';
       try {
-        // Register vault config entry (creates the vault record)
         const r = await fetch('/api/admin/vaults/config', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -1021,7 +1027,6 @@ document.addEventListener('alpine:init', () => {
           const text = await r.text().catch(() => r.statusText);
           throw new Error(r.status + ': ' + text);
         }
-        // Hello handshake registers the vault name in the storage index
         await fetch('/api/hello', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1030,9 +1035,12 @@ document.addEventListener('alpine:init', () => {
         this.vault = name;
         localStorage.setItem('muninnVault', name);
         await this.loadVaults();
-        this.addNotification('success', 'Vault  + name +  created');
+        this.newVaultModal.loading = false;
+        this.newVaultModal.show = false;
+        this.addNotification('success', 'Vault "' + name + '" created');
       } catch (err) {
-        this.addNotification('error', 'Create vault failed: ' + err.message);
+        this.newVaultModal.error = err.message;
+        this.newVaultModal.loading = false;
       }
     },
 
