@@ -6,32 +6,23 @@ $ErrorActionPreference = "Stop"
 $repo = "scrypster/muninndb"
 $installDir = "$env:LOCALAPPDATA\muninn"
 
-# When piped through iex, exit closes the PowerShell session and the window
-# disappears before the user can read the error.  This helper prints the error
-# and waits for a keypress so the message is always visible.
-function Abort($msg) {
-    Write-Host ""
-    Write-Host "  Error: $msg" -ForegroundColor Red
-    Write-Host ""
-    Write-Host "  Press any key to close..." -ForegroundColor DarkGray
-    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-    exit 1
-}
-
 Write-Host ""
 Write-Host "  Installing MuninnDB..." -ForegroundColor Cyan
 Write-Host ""
 
 # Detect architecture
 $arch = if ([Environment]::Is64BitOperatingSystem) { "amd64" } else {
-    Abort "MuninnDB requires a 64-bit Windows system."
+    Write-Host "  Error: MuninnDB requires a 64-bit Windows system." -ForegroundColor Red
+    exit 1
 }
 
 # Query GitHub API for the latest release
 try {
     $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -Headers @{ "User-Agent" = "muninn-installer" }
 } catch {
-    Abort "Could not reach GitHub API. Check your internet connection.`n  $_"
+    Write-Host "  Error: Could not reach GitHub API. Check your internet connection." -ForegroundColor Red
+    Write-Host "  $_" -ForegroundColor DarkGray
+    exit 1
 }
 
 $version = $release.tag_name -replace '^v', ''
@@ -39,8 +30,10 @@ $assetName = "muninn_${version}_windows_${arch}.zip"
 $asset = $release.assets | Where-Object { $_.name -eq $assetName }
 
 if (-not $asset) {
-    $available = ($release.assets | ForEach-Object { $_.name }) -join "`n    "
-    Abort "Could not find $assetName in release $($release.tag_name).`n  Available assets:`n    $available"
+    Write-Host "  Error: Could not find $assetName in release $($release.tag_name)." -ForegroundColor Red
+    Write-Host "  Available assets:" -ForegroundColor DarkGray
+    $release.assets | ForEach-Object { Write-Host "    $($_.name)" -ForegroundColor DarkGray }
+    exit 1
 }
 
 $downloadUrl = $asset.browser_download_url
@@ -57,7 +50,8 @@ try {
     Write-Host " done" -ForegroundColor Green
 } catch {
     Write-Host " failed" -ForegroundColor Red
-    Abort "Download failed: $_"
+    Write-Host "  $_" -ForegroundColor DarkGray
+    exit 1
 }
 
 # Extract
@@ -73,8 +67,10 @@ Write-Host " done" -ForegroundColor Green
 # Verify binary
 $binary = "$installDir\muninn.exe"
 if (-not (Test-Path $binary)) {
-    $contents = (Get-ChildItem $installDir | ForEach-Object { $_.Name }) -join "`n    "
-    Abort "muninn.exe not found after extraction.`n  Contents of ${installDir}:`n    $contents"
+    Write-Host "  Error: muninn.exe not found after extraction." -ForegroundColor Red
+    Write-Host "  Contents of ${installDir}:" -ForegroundColor DarkGray
+    Get-ChildItem $installDir | ForEach-Object { Write-Host "    $($_.Name)" -ForegroundColor DarkGray }
+    exit 1
 }
 
 # Add to PATH if not already there
