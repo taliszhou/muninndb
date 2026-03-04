@@ -174,9 +174,10 @@ type ListEngramsResponse struct {
 
 // AssociationItem is a graph edge for the UI.
 type AssociationItem struct {
-	TargetID string  `json:"target_id"`
-	RelType  uint16  `json:"rel_type"`
-	Weight   float32 `json:"weight"`
+	TargetID          string  `json:"target_id"`
+	RelType           uint16  `json:"rel_type"`
+	Weight            float32 `json:"weight"`
+	CoActivationCount uint32  `json:"co_activation_count"`
 }
 
 // GetEngramLinksRequest requests associations for an engram.

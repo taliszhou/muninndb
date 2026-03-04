@@ -175,9 +175,10 @@ func (w *RESTEngineWrapper) GetEngramLinks(ctx context.Context, req *GetEngramLi
 	links := make([]AssociationItem, len(assocs))
 	for i, a := range assocs {
 		links[i] = AssociationItem{
-			TargetID: a.TargetID.String(),
-			RelType:  uint16(a.RelType),
-			Weight:   a.Weight,
+			TargetID:          a.TargetID.String(),
+			RelType:           uint16(a.RelType),
+			Weight:            a.Weight,
+			CoActivationCount: a.CoActivationCount,
 		}
 	}
 	return &GetEngramLinksResponse{Links: links}, nil
