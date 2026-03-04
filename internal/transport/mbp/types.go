@@ -16,12 +16,13 @@ type RelType uint16
 
 // Association represents a directed link between two engrams
 type Association struct {
-	TargetID      string  `msgpack:"target_id" json:"target_id"`
-	RelType       uint16  `msgpack:"rel_type" json:"rel_type"`
-	Weight        float32 `msgpack:"weight" json:"weight"`
-	Confidence    float32 `msgpack:"confidence" json:"confidence"`
-	CreatedAt     int64   `msgpack:"created_at" json:"created_at"`
-	LastActivated int32   `msgpack:"last_activated" json:"last_activated"`
+	TargetID          string  `msgpack:"target_id" json:"target_id"`
+	RelType           uint16  `msgpack:"rel_type" json:"rel_type"`
+	Weight            float32 `msgpack:"weight" json:"weight"`
+	Confidence        float32 `msgpack:"confidence" json:"confidence"`
+	CreatedAt         int64   `msgpack:"created_at" json:"created_at"`
+	LastActivated     int32   `msgpack:"last_activated" json:"last_activated"`
+	CoActivationCount uint32  `msgpack:"co_activation_count,omitempty" json:"co_activation_count,omitempty"`
 }
 
 // HelloRequest is the HELLO handshake payload.

@@ -21,6 +21,9 @@ func (a *hebbianStoreAdapter) GetAssocWeight(ctx context.Context, ws [8]byte, sr
 }
 
 func (a *hebbianStoreAdapter) UpdateAssocWeight(ctx context.Context, ws [8]byte, src, dst [16]byte, weight float32) error {
+	// This path is only used outside of processBatch (e.g., tests, manual adjustments).
+	// CountDelta is 0 because this is a weight-only update — co-activation count
+	// is accumulated exclusively through UpdateAssocWeightBatch in processBatch.
 	return a.store.UpdateAssocWeight(ctx, ws, storage.ULID(src), storage.ULID(dst), weight, 0)
 }
 

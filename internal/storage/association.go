@@ -84,11 +84,9 @@ func (ps *PebbleStore) WriteAssociation(ctx context.Context, wsPrefix [8]byte, s
 
 	// Forward association (0x03 key)
 	// PeakWeight is seeded to Weight on initial write — this is the association's first peak.
-	// CoActivationCount is seeded to 1: creation itself counts as the first co-activation event.
-	seedCount := assoc.CoActivationCount
-	if seedCount == 0 {
-		seedCount = 1
-	}
+	// Creation is itself a co-activation event; always seed at 1.
+	// Callers should not set CoActivationCount on new associations.
+	const seedCount uint32 = 1
 	fwdKey := keys.AssocFwdKey(wsPrefix, [16]byte(src), assoc.Weight, [16]byte(dst))
 	assocValue := encodeAssocValue(assoc.RelType, assoc.Confidence, assoc.CreatedAt, assoc.LastActivated, assoc.Weight, seedCount)
 	batch.Set(fwdKey, assocValue[:], nil)

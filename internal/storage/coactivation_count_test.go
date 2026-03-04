@@ -148,6 +148,57 @@ func TestCoActivationCount_BatchUpdate(t *testing.T) {
 	}
 }
 
+// TestCoActivationCount_ZeroDeltaDoesNotChange verifies that UpdateAssocWeight
+// with countDelta=0 does not modify CoActivationCount (weight-only update).
+func TestCoActivationCount_ZeroDeltaDoesNotChange(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	ws := store.VaultPrefix("coact-zero-delta")
+
+	src := NewULID()
+	dst := NewULID()
+
+	// Write: count starts at 1.
+	if err := store.WriteAssociation(ctx, ws, src, dst, &Association{
+		TargetID: dst,
+		Weight:   0.5,
+	}); err != nil {
+		t.Fatalf("WriteAssociation: %v", err)
+	}
+
+	// Verify initial count is 1.
+	fresh := NewPebbleStore(store.db, PebbleStoreConfig{CacheSize: 100})
+	results, err := fresh.GetAssociations(ctx, ws, []ULID{src}, 10)
+	if err != nil {
+		t.Fatalf("GetAssociations after write: %v", err)
+	}
+	got := results[src]
+	if len(got) != 1 {
+		t.Fatalf("expected 1 association, got %d", len(got))
+	}
+	if got[0].CoActivationCount != 1 {
+		t.Errorf("CoActivationCount after write: got %d, want 1", got[0].CoActivationCount)
+	}
+
+	// Update weight only (countDelta=0) — count must remain at 1.
+	if err := store.UpdateAssocWeight(ctx, ws, src, dst, 0.7, 0); err != nil {
+		t.Fatalf("UpdateAssocWeight (delta=0): %v", err)
+	}
+
+	fresh2 := NewPebbleStore(store.db, PebbleStoreConfig{CacheSize: 100})
+	results2, err := fresh2.GetAssociations(ctx, ws, []ULID{src}, 10)
+	if err != nil {
+		t.Fatalf("GetAssociations after zero-delta update: %v", err)
+	}
+	got2 := results2[src]
+	if len(got2) != 1 {
+		t.Fatalf("expected 1 association, got %d", len(got2))
+	}
+	if got2[0].CoActivationCount != 1 {
+		t.Errorf("CoActivationCount after delta=0: got %d, want 1 (must not change)", got2[0].CoActivationCount)
+	}
+}
+
 // TestCoActivationCount_LegacyValueDecodesAsZero verifies that a 22-byte legacy
 // association value (without the CoActivationCount field) decodes with count=0.
 func TestCoActivationCount_LegacyValueDecodesAsZero(t *testing.T) {

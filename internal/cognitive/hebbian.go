@@ -229,9 +229,11 @@ func (hw *HebbianWorker) processBatch(ctx context.Context, batch []CoActivationE
 		logNew := math.Log(float64(current)) + effectiveSignal*math.Log(1.0+HebbianLearningRate)
 		newWeight := float32(math.Min(1.0, math.Exp(logNew)))
 
-		countDelta := uint32(stats.count)
+		var countDelta uint32
 		if stats.count > math.MaxUint32 {
 			countDelta = math.MaxUint32
+		} else {
+			countDelta = uint32(stats.count)
 		}
 
 		updates = append(updates, AssocWeightUpdate{
