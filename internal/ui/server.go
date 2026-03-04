@@ -32,6 +32,7 @@ type Server struct {
 	ring          *logging.RingBuffer
 	tlsConfig     *tls.Config // nil = plain TCP
 	corsOrigins   []string
+	ln            net.Listener
 }
 
 // sseHub manages connected SSE clients.
@@ -143,11 +144,12 @@ func (s *Server) Start(ctx context.Context, addr string) error {
 	if err != nil {
 		return err
 	}
+	s.ln = ln
+	s.server.Addr = ln.Addr().String()
 	if s.tlsConfig != nil {
 		ln = tls.NewListener(ln, s.tlsConfig)
 		slog.Info("ui: TLS enabled", "addr", ln.Addr().String())
 	}
-	s.server.Addr = addr
 
 	go func() {
 		if err := s.server.Serve(ln); err != nil && err != http.ErrServerClosed {
@@ -158,6 +160,14 @@ func (s *Server) Start(ctx context.Context, addr string) error {
 	go s.broadcaster(ctx)
 
 	return nil
+}
+
+// Addr returns the server's resolved listening address after Start has been called.
+func (s *Server) Addr() string {
+	if s.ln != nil {
+		return s.ln.Addr().String()
+	}
+	return s.server.Addr
 }
 
 // Stop gracefully shuts down the UI server.

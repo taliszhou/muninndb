@@ -609,6 +609,43 @@ func TestEvents_RequiresAuth(t *testing.T) {
 	}
 }
 
+func TestUIServerBindsToAddr(t *testing.T) {
+	webFS := makeMockFS()
+	eng := &mockEngine{}
+	srv, err := ui.NewServer(webFS, eng, http.NotFoundHandler(), nil, nil, logging.NewRingBuffer(10, nil), nil, nil)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := srv.Start(ctx, "127.0.0.1:0"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer stopCancel()
+		srv.Stop(stopCtx)
+	}()
+
+	addr := srv.Addr()
+	if addr == "" || addr == "127.0.0.1:0" {
+		t.Fatalf("expected resolved addr, got %q", addr)
+	}
+
+	resp, err := http.Get("http://" + addr + "/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	resp.Body.Close()
+	// Any HTTP response (200, 302, 401) proves the server is listening
+	if resp.StatusCode == 0 {
+		t.Fatalf("expected a valid HTTP status, got 0")
+	}
+	t.Logf("server listening on %s, status %d", addr, resp.StatusCode)
+}
+
 func TestSessionCookie_SecureFlagWithTLS(t *testing.T) {
 	db := openTestPebble(t)
 	store := auth.NewStore(db)

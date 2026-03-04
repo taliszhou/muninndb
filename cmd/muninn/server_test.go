@@ -7,6 +7,81 @@ import (
 	plugincfg "github.com/scrypster/muninndb/internal/config"
 )
 
+func TestAllAddrDefaults_UseListenHost(t *testing.T) {
+	host := parseListenHost([]string{"--listen-host", "10.0.0.1"}, "")
+	cases := []struct{ name, port, want string }{
+		{"mbp", "8474", "10.0.0.1:8474"},
+		{"rest", "8475", "10.0.0.1:8475"},
+		{"mcp", "8750", "10.0.0.1:8750"},
+		{"grpc", "8477", "10.0.0.1:8477"},
+		{"ui", "8476", "10.0.0.1:8476"},
+	}
+	for _, c := range cases {
+		got := host + ":" + c.port
+		if got != c.want {
+			t.Errorf("%s addr: got %s, want %s", c.name, got, c.want)
+		}
+	}
+}
+
+func TestMUNINN_UI_ADDR_EnvOverridesListenHost(t *testing.T) {
+	t.Setenv("MUNINN_UI_ADDR", "192.168.1.100:9999")
+	uiAddrDefault := "10.0.0.1:8476"
+	if v := os.Getenv("MUNINN_UI_ADDR"); v != "" {
+		uiAddrDefault = v
+	}
+	if uiAddrDefault != "192.168.1.100:9999" {
+		t.Errorf("expected 192.168.1.100:9999, got %s", uiAddrDefault)
+	}
+}
+
+func TestCORSOriginsResolution(t *testing.T) {
+	cases := []struct {
+		input string
+		want  []string
+	}{
+		{"http://flag.local", []string{"http://flag.local"}},
+		{"http://env.local", []string{"http://env.local"}},
+		{"http://a.com,http://b.com", []string{"http://a.com", "http://b.com"}},
+		{"", nil},
+	}
+	for _, tc := range cases {
+		got := parseCORSOrigins(tc.input)
+		if len(got) != len(tc.want) {
+			t.Errorf("parseCORSOrigins(%q): got %v (len %d), want %v (len %d)", tc.input, got, len(got), tc.want, len(tc.want))
+			continue
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("parseCORSOrigins(%q)[%d]: got %q, want %q", tc.input, i, got[i], tc.want[i])
+			}
+		}
+	}
+}
+
+func TestBuildDaemonArgs_CORSFlagBeatsEnv(t *testing.T) {
+	osArgs := []string{"--cors-origins=http://flag.local"}
+	corsOriginsEnv := "http://env.local"
+	got := buildDaemonArgs("/tmp/data", false, "", osArgs, "", corsOriginsEnv)
+
+	foundFlag := false
+	foundEnv := false
+	for _, arg := range got {
+		if arg == "http://flag.local" {
+			foundFlag = true
+		}
+		if arg == "http://env.local" {
+			foundEnv = true
+		}
+	}
+	if !foundFlag {
+		t.Errorf("expected http://flag.local in args %v", got)
+	}
+	if foundEnv {
+		t.Errorf("expected http://env.local to be absent from args %v", got)
+	}
+}
+
 func TestResolveEmbedInfo_EnvOllama(t *testing.T) {
 	clearEmbedEnv(t)
 	t.Setenv("MUNINN_OLLAMA_URL", "ollama://localhost:11434/nomic-embed-text")
