@@ -17,6 +17,9 @@ import (
 // vault is configured with the supplied inlineEnrichment mode string.
 // This requires wiring an auth.Store so resolveVaultPlasticity can read the
 // vault-level plasticity config.
+//
+// testEnv passes nil for auth.Store; this helper wires a real auth.Store so
+// the engine can read per-vault InlineEnrichment config via resolveVaultPlasticity.
 func testEnvWithInlineMode(t *testing.T, inlineEnrichment string) (*Engine, func()) {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "muninndb-enrichment-mode-test-*")
@@ -122,7 +125,8 @@ func TestWrite_BackgroundOnlyMode_CallerSummaryIgnored(t *testing.T) {
 		t.Fatalf("Read: %v", err)
 	}
 
-	// background_only legitimately ignores caller data — LLM enrichment wins.
+	// LLM enrichment would win in production; in tests the background worker is
+	// a no-op so summary will be empty either way.
 	if readResp.Summary != "" {
 		t.Errorf("Summary = %q, want empty string (background_only should ignore caller data)", readResp.Summary)
 	}
