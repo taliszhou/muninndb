@@ -503,6 +503,7 @@ func runServer() {
 		fmt.Fprintf(os.Stderr, "  MUNINN_LOCAL_EMBED           Set to \"0\" to disable bundled ONNX embedder\n")
 		fmt.Fprintf(os.Stderr, "  MUNINN_ENRICH_URL            LLM enrichment endpoint URL (optional)\n")
 		fmt.Fprintf(os.Stderr, "  MUNINN_ENRICH_API_KEY        API key for enrichment (or MUNINN_ANTHROPIC_KEY)\n")
+		fmt.Fprintf(os.Stderr, "  MUNINN_LISTEN_HOST           Host to bind all servers to (e.g. 0.0.0.0 for LAN access)\n")
 		fmt.Fprintf(os.Stderr, "  MUNINN_CORS_ORIGINS          Comma-separated CORS allowed origins\n")
 		fmt.Fprintf(os.Stderr, "  MUNINN_MEM_LIMIT_GB          Memory limit in GB (default: 4)\n")
 		fmt.Fprintf(os.Stderr, "  MUNINN_GC_PERCENT            Go GC target percentage (default: 200)\n")
@@ -574,6 +575,10 @@ func runServer() {
 	if err := validateServerFlags(addrsToValidate...); err != nil {
 		slog.Error("invalid server address flag", "err", err)
 		os.Exit(1)
+	}
+
+	if listenHost == "0.0.0.0" {
+		slog.Warn("all services bound to 0.0.0.0 — ensure firewall rules are in place")
 	}
 
 	var logLevel slog.Level

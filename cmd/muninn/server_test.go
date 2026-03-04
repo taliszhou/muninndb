@@ -291,9 +291,12 @@ func TestParseListenHost_SingleDashSpaceSyntax(t *testing.T) {
 // set, the mcp-addr default is built from that host.
 func TestListenHostFlag_OverridesAddrDefaults(t *testing.T) {
 	host := parseListenHost([]string{"--listen-host", "10.0.0.1"}, "")
-	wantMCPAddr := host + ":" + defaultMCPPort
-	if wantMCPAddr != "10.0.0.1:"+defaultMCPPort {
-		t.Errorf("expected mcp addr default 10.0.0.1:%s, got %q", defaultMCPPort, wantMCPAddr)
+	if host != "10.0.0.1" {
+		t.Fatalf("expected 10.0.0.1, got %s", host)
+	}
+	gotAddr := host + ":" + defaultMCPPort
+	if gotAddr != "10.0.0.1:8750" {
+		t.Fatalf("expected 10.0.0.1:8750, got %s", gotAddr)
 	}
 }
 

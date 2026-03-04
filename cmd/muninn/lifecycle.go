@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -50,6 +51,30 @@ func runStart(webEnabled bool) {
 	// Pass MCP token from token file if present
 	if tok := readTokenFile(); tok != "" {
 		args = append(args, "--mcp-token", tok)
+	}
+	// Pass through --listen-host if it differs from the default
+	listenHost := parseListenHost(os.Args[1:], os.Getenv("MUNINN_LISTEN_HOST"))
+	if listenHost != "127.0.0.1" {
+		args = append(args, "--listen-host", listenHost)
+	}
+	// Pass through --cors-origins if non-empty
+	corsOrigins := os.Getenv("MUNINN_CORS_ORIGINS")
+	for i, arg := range os.Args {
+		if (arg == "--cors-origins" || arg == "-cors-origins") && i+1 < len(os.Args) {
+			corsOrigins = os.Args[i+1]
+			break
+		}
+		if after, ok := strings.CutPrefix(arg, "--cors-origins="); ok {
+			corsOrigins = after
+			break
+		}
+		if after, ok := strings.CutPrefix(arg, "-cors-origins="); ok {
+			corsOrigins = after
+			break
+		}
+	}
+	if corsOrigins != "" {
+		args = append(args, "--cors-origins", corsOrigins)
 	}
 
 	cmd := exec.Command(os.Args[0], args...)
