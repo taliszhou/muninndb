@@ -4,7 +4,7 @@ FROM golang:1.24-bookworm AS builder
 
 WORKDIR /src
 
-ARG TARGETARCH=amd64
+ARG TARGETARCH
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl make ca-certificates \
