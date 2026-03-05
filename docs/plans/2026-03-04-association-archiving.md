@@ -369,6 +369,8 @@ When an edge hits the dynamic floor AND its consolidation score exceeds `archive
 |------|--------|
 | `internal/storage/association.go` | Modify `DecayAssocWeights` signature to accept `archiveThreshold float64`, add archive branch in `flushChunk` |
 | `internal/storage/association_test.go` | Add `TestDecayAssocWeights_ArchivesStrongEdge` |
+| `internal/storage/association_durability_test.go` | Modify: 4 calls to `DecayAssocWeights` need a 5th arg (pass `0.0` to disable archiving in tests) |
+| `internal/storage/assoc_weight_index_test.go` | Modify: 1 call to `DecayAssocWeights` needs a 5th arg (pass `0.0`) |
 | `internal/storage/store.go` | Modify: `EngineStore` interface — update `DecayAssocWeights` signature to include the new `archiveThreshold float64` parameter |
 | `internal/cognitive/hebbian.go` | Update `HebbianStore` interface to match new signature |
 | `internal/cognitive/store_adapters.go` | Update adapter to pass through new param |
@@ -1066,6 +1068,8 @@ Insert the archive restore call between Phase 4.5 (PAS transition boost) and Pha
 ### Steps
 
 1. **Failing test.** Add in `internal/engine/activation/activation_test.go` (or a new test file):
+
+> **Note:** The test below is a skeleton. The implementer must wire up a real `PebbleStore` test harness (see `internal/engine/activation/engine_test.go` for the established pattern) and insert an archived edge directly at the `0x25` key before running activation. Flesh out the body before marking this task complete.
 
 ```go
 func TestPhase4_75ArchiveRestore_RestoredEdgesVisibleToBFS(t *testing.T) {
