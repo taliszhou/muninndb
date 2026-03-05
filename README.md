@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/scrypster/muninndb/actions/workflows/ci.yml/badge.svg)](https://github.com/scrypster/muninndb/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-BSL%201.1-blue)](LICENSE)
-[![Go](https://img.shields.io/badge/go-1.22%2B-00ADD8)](https://go.dev)
+[![Go](https://img.shields.io/badge/go-1.25%2B-00ADD8)](https://go.dev)
 [![Status](https://img.shields.io/badge/status-alpha-orange)](https://github.com/scrypster/muninndb/releases)
 
 > **Prerequisites:** None. Single binary, zero dependencies, zero configuration required.
@@ -75,12 +75,13 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 {
   "mcpServers": {
     "muninn": {
-      "type": "http",
       "url": "http://localhost:8750/mcp"
     }
   }
 }
 ```
+
+> **Note:** `"type"` is intentionally omitted. Claude Desktop v1.1.4010+ crashes on startup if `"type": "http"` is present in any `mcpServers` entry — the transport is inferred from the URL.
 </details>
 
 <details>
@@ -417,7 +418,13 @@ Ports at a glance: `8474` MBP · `8475` REST · `8476` Web UI · `8477` gRPC · 
 <details>
 <summary>MCP connection fails with schema validation error</summary>
 
-MuninnDB uses `"type": "http"` for MCP transport. Older versions of some AI tools (notably Claude Code before v2.1.53) only supported `"type": "sse"`. If your tool reports a schema validation or config parsing error, change `"type": "http"` to `"type": "sse"` in your config file. MuninnDB's server handles both transports — only the client-side config needs to match what your tool supports.
+MuninnDB speaks both `http` and `sse` MCP transports — the server handles either. The `"type"` field in your config must match what your client expects:
+
+- **Claude Desktop v1.1.4010+**: omit `"type"` entirely — the transport is inferred from the URL. Adding `"type": "http"` crashes Claude Desktop on startup.
+- **Most other tools** (Cursor, Windsurf, VS Code, etc.): `"type": "http"` is correct.
+- **Older clients** (Claude Code before v2.1.53): use `"type": "sse"`.
+
+If your tool reports a schema validation or config parsing error, try removing `"type"` or switching between `"http"` and `"sse"`.
 </details>
 
 <details>
