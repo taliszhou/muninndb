@@ -136,3 +136,69 @@ func TestFindVaultPrefix_NotFound(t *testing.T) {
 		t.Error("FindVaultPrefix: expected ok=false for unwritten ULID, got true")
 	}
 }
+
+func TestUpdateEmbedding_SetsDimInERF(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	ws := store.VaultPrefix("embed-dim-test")
+
+	id, err := store.WriteEngram(ctx, ws, &Engram{
+		Concept: "test concept",
+		Content: "test content",
+	})
+	if err != nil {
+		t.Fatalf("WriteEngram: %v", err)
+	}
+
+	// EmbedDim should initially be 0.
+	got, err := store.GetEngram(ctx, ws, id)
+	if err != nil {
+		t.Fatalf("GetEngram before update: %v", err)
+	}
+	if got.EmbedDim != EmbedNone {
+		t.Errorf("initial EmbedDim = %d, want 0", got.EmbedDim)
+	}
+
+	// Update with a 384-dim vector.
+	vec := make([]float32, 384)
+	vec[0] = 0.1
+	if err := store.UpdateEmbedding(ctx, ws, id, vec); err != nil {
+		t.Fatalf("UpdateEmbedding: %v", err)
+	}
+
+	got, err = store.GetEngram(ctx, ws, id)
+	if err != nil {
+		t.Fatalf("GetEngram after update: %v", err)
+	}
+	if got.EmbedDim != EmbedDimension(types.Embed384) {
+		t.Errorf("EmbedDim = %d, want %d (Embed384)", got.EmbedDim, types.Embed384)
+	}
+}
+
+func TestUpdateEmbedding_Dim3072(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	ws := store.VaultPrefix("embed-dim-3072")
+
+	id, err := store.WriteEngram(ctx, ws, &Engram{
+		Concept: "gemini test",
+		Content: "3072-dim embedding test",
+	})
+	if err != nil {
+		t.Fatalf("WriteEngram: %v", err)
+	}
+
+	vec := make([]float32, 3072)
+	vec[0] = 0.5
+	if err := store.UpdateEmbedding(ctx, ws, id, vec); err != nil {
+		t.Fatalf("UpdateEmbedding: %v", err)
+	}
+
+	got, err := store.GetEngram(ctx, ws, id)
+	if err != nil {
+		t.Fatalf("GetEngram: %v", err)
+	}
+	if got.EmbedDim != EmbedDimension(types.Embed3072) {
+		t.Errorf("EmbedDim = %d, want %d (Embed3072)", got.EmbedDim, types.Embed3072)
+	}
+}
