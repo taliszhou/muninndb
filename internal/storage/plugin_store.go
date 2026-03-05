@@ -7,6 +7,7 @@ import (
 	"github.com/cockroachdb/pebble"
 	"github.com/scrypster/muninndb/internal/storage/erf"
 	"github.com/scrypster/muninndb/internal/storage/keys"
+	"github.com/scrypster/muninndb/internal/types"
 )
 
 // CountWithoutFlag returns the number of engrams across all vaults that are
@@ -121,6 +122,25 @@ func (ps *PebbleStore) getDigestFlagsRaw(id [16]byte) (uint8, error) {
 		return 0, nil
 	}
 	return val[0], nil
+}
+
+// dimFromLen maps a vector length to the EmbedDimension enum value.
+// Returns EmbedOther for any non-zero length not in the known set.
+func dimFromLen(n int) types.EmbedDimension {
+	switch n {
+	case 0:
+		return types.EmbedNone
+	case 384:
+		return types.Embed384
+	case 768:
+		return types.Embed768
+	case 1536:
+		return types.Embed1536
+	case 3072:
+		return types.Embed3072
+	default:
+		return types.EmbedOther
+	}
 }
 
 // UpdateEmbedding stores an embedding vector for an engram.

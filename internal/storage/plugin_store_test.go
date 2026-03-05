@@ -3,6 +3,8 @@ package storage
 import (
 	"context"
 	"testing"
+
+	"github.com/scrypster/muninndb/internal/types"
 )
 
 // digestFlagAll is a convenience flag covering all bits, used to identify any
@@ -99,6 +101,27 @@ func TestFindVaultPrefix(t *testing.T) {
 	}
 	if gotWS != ws {
 		t.Errorf("FindVaultPrefix: got ws %x, want %x", gotWS, ws)
+	}
+}
+
+func TestDimFromLen(t *testing.T) {
+	cases := []struct {
+		n    int
+		want types.EmbedDimension
+	}{
+		{0, types.EmbedNone},
+		{384, types.Embed384},
+		{768, types.Embed768},
+		{1536, types.Embed1536},
+		{3072, types.Embed3072},
+		{512, types.EmbedOther},
+		{1, types.EmbedOther},
+	}
+	for _, tc := range cases {
+		got := dimFromLen(tc.n)
+		if got != tc.want {
+			t.Errorf("dimFromLen(%d) = %d, want %d", tc.n, got, tc.want)
+		}
 	}
 }
 
