@@ -498,6 +498,7 @@ func (ps *PebbleStore) DecayAssocWeights(ctx context.Context, wsPrefix [8]byte, 
 				archVal := encodeArchiveValue(e.relType, e.confidence, e.createdAt, e.lastActivated, e.peakWeight, e.coActivationCount, 0)
 				_ = batch.Set(keys.ArchiveAssocKey(wsPrefix, e.src, e.dst), archVal[:], nil)
 				_ = batch.Delete(keys.AssocWeightIndexKey(wsPrefix, e.src, e.dst), nil)
+				ps.AddToArchiveBloom(e.src)
 			} else if !e.remove {
 				// Preserve existing metadata. Do NOT update lastActivated here —
 				// decay is a background process, not a user activation.
