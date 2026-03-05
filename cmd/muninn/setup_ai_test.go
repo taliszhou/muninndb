@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -305,6 +306,72 @@ func TestOpenClawConfigPath(t *testing.T) {
 	home, _ := os.UserHomeDir()
 	if !strings.HasPrefix(path, home) {
 		t.Errorf("path %q should start with home dir", path)
+	}
+}
+
+func TestOpenCodeMCPEntry_WithToken(t *testing.T) {
+	entry := openCodeMCPEntry("http://localhost:8750/mcp", "mdb_testtoken123")
+	if entry["type"] != "remote" {
+		t.Errorf("type = %v, want \"remote\"", entry["type"])
+	}
+	if entry["oauth"] != false {
+		t.Errorf("oauth = %v, want false", entry["oauth"])
+	}
+	headers, ok := entry["headers"].(map[string]any)
+	if !ok {
+		t.Fatal("headers not found when token supplied")
+	}
+	auth, _ := headers["Authorization"].(string)
+	if auth != "Bearer {file:~/.muninn/mcp.token}" {
+		t.Errorf("Authorization = %q, want file-template literal", auth)
+	}
+	if strings.Contains(fmt.Sprintf("%v", entry), "mdb_testtoken123") {
+		t.Error("raw token value should NOT appear in entry")
+	}
+}
+
+func TestOpenCodeMCPEntry_NoToken(t *testing.T) {
+	entry := openCodeMCPEntry("http://localhost:8750/mcp", "")
+	if entry["type"] != "remote" {
+		t.Errorf("type = %v, want \"remote\"", entry["type"])
+	}
+	if entry["oauth"] != false {
+		t.Errorf("oauth = %v, want false", entry["oauth"])
+	}
+	if _, ok := entry["headers"]; ok {
+		t.Error("headers should not be present when token is empty")
+	}
+}
+
+func TestMergeOpenCodeMCP_PreservesOtherEntries(t *testing.T) {
+	cfg := map[string]any{
+		"mcp": map[string]any{
+			"other-tool": map[string]any{"type": "remote", "url": "http://other:9999"},
+		},
+		"topKey": "preserved",
+	}
+	mergeOpenCodeMCP(cfg, "http://localhost:8750/mcp", "tok")
+	mcp := cfg["mcp"].(map[string]any)
+	if _, ok := mcp["other-tool"]; !ok {
+		t.Error("other-tool entry removed")
+	}
+	if _, ok := mcp["muninn"]; !ok {
+		t.Error("muninn not added")
+	}
+	if cfg["topKey"] != "preserved" {
+		t.Error("top-level key lost")
+	}
+}
+
+func TestMergeOpenCodeMCP_EmptyConfig(t *testing.T) {
+	cfg := map[string]any{}
+	mergeOpenCodeMCP(cfg, "http://localhost:8750/mcp", "tok")
+	mcp, ok := cfg["mcp"].(map[string]any)
+	if !ok {
+		t.Fatal("cfg[\"mcp\"] not a map")
+	}
+	if _, ok := mcp["muninn"]; !ok {
+		t.Error("muninn not added")
 	}
 }
 

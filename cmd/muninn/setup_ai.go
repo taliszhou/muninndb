@@ -188,6 +188,34 @@ func mergeMCPServers(cfg map[string]any, mcpURL, token string) {
 	cfg["mcpServers"] = servers
 }
 
+// openCodeMCPEntry returns the JSON map for muninn's OpenCode MCP entry.
+// OpenCode requires type "remote", explicit oauth:false, and uses a
+// file-template for auth so the token is read from disk at startup.
+func openCodeMCPEntry(mcpURL, token string) map[string]any {
+	entry := map[string]any{
+		"type":  "remote",
+		"url":   mcpURL,
+		"oauth": false,
+	}
+	if token != "" {
+		entry["headers"] = map[string]any{
+			"Authorization": "Bearer {file:~/.muninn/mcp.token}",
+		}
+	}
+	return entry
+}
+
+// mergeOpenCodeMCP upserts muninn into cfg["mcp"]["muninn"],
+// preserving all other entries under the "mcp" top-level key.
+func mergeOpenCodeMCP(cfg map[string]any, mcpURL, token string) {
+	mcp, ok := cfg["mcp"].(map[string]any)
+	if !ok {
+		mcp = map[string]any{}
+	}
+	mcp["muninn"] = openCodeMCPEntry(mcpURL, token)
+	cfg["mcp"] = mcp
+}
+
 // claudeCodeConfigPath returns the path to Claude Code's (claude CLI) config file.
 // Claude Code reads ~/.claude.json for global MCP server configuration.
 func claudeCodeConfigPath() string {
