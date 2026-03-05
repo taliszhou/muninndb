@@ -598,12 +598,14 @@ func (e *Engine) Write(ctx context.Context, req *mbp.WriteRequest) (*mbp.WriteRe
 	var callerRelationships []mbp.InlineRelationship
 
 	switch inlineMode {
-	case "caller_only", "caller_preferred":
+	case "background_only":
+		// background_only: background LLM runs and wins; ignore any caller-provided fields.
+	default:
+		// "caller_only", "caller_preferred", "disabled", and unknown modes:
+		// always store non-empty caller-provided fields.
 		callerSummary = req.Summary
 		callerEntities = req.Entities
 		callerRelationships = req.Relationships
-	case "disabled", "background_only":
-		// Ignore caller enrichment data.
 	}
 
 	// Build storage.Engram from request
@@ -958,7 +960,11 @@ func (e *Engine) WriteBatch(ctx context.Context, reqs []*mbp.WriteRequest) ([]*m
 		var callerRelationships []mbp.InlineRelationship
 
 		switch inlineMode {
-		case "caller_only", "caller_preferred":
+		case "background_only":
+			// background_only: background LLM runs and wins; ignore any caller-provided fields.
+		default:
+			// "caller_only", "caller_preferred", "disabled", and unknown modes:
+			// always store non-empty caller-provided fields.
 			callerSummary = req.Summary
 			callerEntities = req.Entities
 			callerRelationships = req.Relationships

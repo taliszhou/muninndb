@@ -78,7 +78,7 @@ func (s *MCPServer) handleRemember(ctx context.Context, w http.ResponseWriter, i
 		req.CreatedAt = &t
 	}
 	applyTypeArgs(args, req)
-	applyEnrichmentArgs(args, req)
+	malformed := applyEnrichmentArgs(args, req)
 
 	resp, err := s.engine.Write(ctx, req)
 	if err != nil {
@@ -93,6 +93,12 @@ func (s *MCPServer) handleRemember(ctx context.Context, w http.ResponseWriter, i
 	result := WriteResult{ID: resp.ID}
 	if len(content) > 500 {
 		result.Hint = "Tip: memories work best when each one captures a single concept. For future writes, consider using muninn_remember_batch to store multiple focused memories at once."
+	}
+	if malformed > 0 {
+		if result.Hint != "" {
+			result.Hint += " "
+		}
+		result.Hint += fmt.Sprintf("%d entity item(s) were malformed (expected {\"name\":\"...\",\"type\":\"...\"} objects) and were skipped.", malformed)
 	}
 	sendResult(w, id, textContent(mustJSON(result)))
 }
@@ -109,6 +115,7 @@ func (s *MCPServer) handleRememberBatch(ctx context.Context, w http.ResponseWrit
 	}
 
 	reqs := make([]*mbp.WriteRequest, 0, len(memoriesAny))
+	malformedCounts := make([]int, 0, len(memoriesAny))
 	for i, mAny := range memoriesAny {
 		m, ok := mAny.(map[string]any)
 		if !ok {
@@ -154,8 +161,9 @@ func (s *MCPServer) handleRememberBatch(ctx context.Context, w http.ResponseWrit
 			req.CreatedAt = &t
 		}
 		applyTypeArgs(m, req)
-		applyEnrichmentArgs(m, req)
+		malformed := applyEnrichmentArgs(m, req)
 		reqs = append(reqs, req)
+		malformedCounts = append(malformedCounts, malformed)
 	}
 
 	responses, errs := s.engine.WriteBatch(ctx, reqs)
@@ -165,6 +173,7 @@ func (s *MCPServer) handleRememberBatch(ctx context.Context, w http.ResponseWrit
 		ID     string `json:"id,omitempty"`
 		Status string `json:"status"`
 		Error  string `json:"error,omitempty"`
+		Hint   string `json:"hint,omitempty"`
 	}
 	results := make([]batchItemResult, len(reqs))
 	for i := range reqs {
@@ -172,6 +181,9 @@ func (s *MCPServer) handleRememberBatch(ctx context.Context, w http.ResponseWrit
 			results[i] = batchItemResult{Index: i, Status: "error", Error: errs[i].Error()}
 		} else {
 			results[i] = batchItemResult{Index: i, ID: responses[i].ID, Status: "ok"}
+		}
+		if malformedCounts[i] > 0 {
+			results[i].Hint = fmt.Sprintf("%d entity item(s) were malformed (expected {\"name\":\"...\",\"type\":\"...\"} objects) and were skipped.", malformedCounts[i])
 		}
 	}
 	sendResult(w, id, textContent(mustJSON(map[string]any{
@@ -1016,7 +1028,8 @@ var validEntityTypes = map[string]bool{
 	"event": true, "other": true,
 }
 
-func applyEnrichmentArgs(args map[string]any, req *mbp.WriteRequest) {
+func applyEnrichmentArgs(args map[string]any, req *mbp.WriteRequest) int {
+	malformed := 0
 	if summary, ok := args["summary"].(string); ok && summary != "" {
 		req.Summary = summary
 	}
@@ -1027,6 +1040,7 @@ func applyEnrichmentArgs(args map[string]any, req *mbp.WriteRequest) {
 			}
 			eMap, ok := eAny.(map[string]any)
 			if !ok {
+				malformed++
 				continue
 			}
 			name, _ := eMap["name"].(string)
@@ -1104,6 +1118,7 @@ func applyEnrichmentArgs(args map[string]any, req *mbp.WriteRequest) {
 			})
 		}
 	}
+	return malformed
 }
 
 var relTypeMap = map[string]storage.RelType{
