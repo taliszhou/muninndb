@@ -163,7 +163,7 @@ func (ps *PebbleStore) UpdateEmbedding(ctx context.Context, wsPrefix [8]byte, id
 	batch.Set(keys.EmbeddingKey(wsPrefix, [16]byte(id)), embedBytes, nil)
 
 	// Patch EmbedDim in the ERF record so the UI reflects embedding status.
-	// EmbedDim lives at absolute byte offset HeaderSize(8) + OffsetEmbedDim(67) = 75.
+	// EmbedDim lives at byte offset erf.OffsetEmbedDim (67) from the record start.
 	// PatchEmbedDim also recomputes the CRC32 trailer so the record stays valid.
 	dim := dimFromLen(len(vec))
 	if dim != types.EmbedNone {
@@ -176,8 +176,12 @@ func (ps *PebbleStore) UpdateEmbedding(ctx context.Context, wsPrefix [8]byte, id
 
 			if patchErr := erf.PatchEmbedDim(buf, uint8(dim)); patchErr == nil {
 				batch.Set(erfKey, buf, nil)
-				// Invalidate the L1 cache so the next GetEngram re-reads from Pebble.
+				// Also update the 0x02 meta key so GetMetadata sees the new EmbedDim.
+				metaKey := keys.MetaKey(wsPrefix, [16]byte(id))
+				batch.Set(metaKey, erf.MetaKeySlice(buf), nil)
+				// Invalidate both caches so the next read re-fetches from Pebble.
 				ps.cache.Delete(wsPrefix, id)
+				ps.metaCache.Remove([16]byte(id))
 			}
 		}
 		// If the ERF record doesn't exist (race), skip — WriteEngram will set it.
