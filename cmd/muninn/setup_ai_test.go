@@ -282,6 +282,20 @@ func TestParseToolNumbers(t *testing.T) {
 	}
 }
 
+// TestOpenCodeConfigPath verifies OpenCode config path is absolute and contains "opencode".
+func TestOpenCodeConfigPath(t *testing.T) {
+	path := openCodeConfigPath()
+	if !filepath.IsAbs(path) {
+		t.Errorf("path %q should be absolute", path)
+	}
+	if !strings.Contains(path, "opencode") {
+		t.Errorf("path %q should contain 'opencode'", path)
+	}
+	if !strings.HasSuffix(path, "opencode.json") {
+		t.Errorf("path %q should end with opencode.json", path)
+	}
+}
+
 // TestOpenClawConfigPath verifies OpenClaw config path is set correctly.
 func TestOpenClawConfigPath(t *testing.T) {
 	path := openClawConfigPath()

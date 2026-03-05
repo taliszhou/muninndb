@@ -248,6 +248,24 @@ func openClawConfigPath() string {
 	return filepath.Join(home, ".openclaw", "mcp.json")
 }
 
+// openCodeConfigPath returns the path to OpenCode's config file.
+// macOS/Linux: ~/.config/opencode/opencode.json
+// Windows:     %APPDATA%\opencode\opencode.json
+func openCodeConfigPath() string {
+	switch runtime.GOOS {
+	case "windows":
+		appData := os.Getenv("APPDATA")
+		if appData == "" {
+			home, _ := os.UserHomeDir()
+			appData = filepath.Join(home, "AppData", "Roaming")
+		}
+		return filepath.Join(appData, "opencode", "opencode.json")
+	default:
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, ".config", "opencode", "opencode.json")
+	}
+}
+
 // configureClaudeDesktop writes the muninn MCP entry into Claude Desktop's config.
 func configureClaudeDesktop(mcpURL, token string) error {
 	path := claudeDesktopConfigPath()
