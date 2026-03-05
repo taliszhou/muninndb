@@ -182,6 +182,12 @@ type ActivationStore interface {
 	// Returns 0 if not in cache; callers fall back to eng.LastAccess.
 	EngramLastAccessNs(wsPrefix [8]byte, id storage.ULID) int64
 	EngramIDsByCreatedRange(ctx context.Context, wsPrefix [8]byte, since, until time.Time, limit int) ([]storage.ULID, error)
+	// RestoreArchivedEdgesTransitive lazily restores archived edges for src and
+	// its direct neighbors, returning the set of restored destination IDs.
+	RestoreArchivedEdgesTransitive(ctx context.Context, wsPrefix [8]byte, src storage.ULID, maxDirect int, maxTransitive int) ([]storage.ULID, error)
+	// ArchiveBloomMayContain returns true if src may have archived edges
+	// (Bloom filter probabilistic check; false positives possible, no false negatives).
+	ArchiveBloomMayContain(id [16]byte) bool
 }
 
 // FTSIndex is the full-text search interface.
@@ -374,6 +380,9 @@ func (e *ActivationEngine) Run(ctx context.Context, req *ActivateRequest) (*Acti
 	if req.PASEnabled {
 		e.phase4_5TransitionBoost(ctx, ws, req.VaultID, fused)
 	}
+
+	// Phase 4.75: Lazy archive restore — check Bloom filter, restore dormant edges.
+	e.phase4_75ArchiveRestore(ctx, ws, fused)
 
 	// Resolve traversal profile for Phase 5 and for audit logging.
 	// Always resolved so ProfileUsed is set on every activation, regardless of HopDepth.
@@ -846,6 +855,21 @@ func resolveProfile(req *ActivateRequest) (string, *TraversalProfile) {
 	}
 	inferredName := InferProfile(req.Context, req.VaultDefault)
 	return inferredName, GetProfile(inferredName)
+}
+
+// phase4_75ArchiveRestore checks the Bloom filter for archived edges among
+// the fused candidate IDs and lazily restores them before BFS traversal.
+// False positives from the Bloom filter trigger a cheap storage scan that
+// returns immediately when no archive keys are found; false negatives are
+// impossible, so no archived edges are silently skipped.
+func (e *ActivationEngine) phase4_75ArchiveRestore(ctx context.Context, ws [8]byte, candidates []fusedCandidate) {
+	for _, c := range candidates {
+		if !e.store.ArchiveBloomMayContain([16]byte(c.id)) {
+			continue
+		}
+		// Restore top-10 direct + top-5 transitive neighbors.
+		_, _ = e.store.RestoreArchivedEdgesTransitive(ctx, ws, c.id, 10, 5)
+	}
 }
 
 // phase5Traverse explores the association graph via level-by-level BFS from top candidates.
