@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/cockroachdb/pebble"
 	"github.com/scrypster/muninndb/internal/storage/erf"
@@ -124,25 +125,6 @@ func (ps *PebbleStore) getDigestFlagsRaw(id [16]byte) (uint8, error) {
 	return val[0], nil
 }
 
-// dimFromLen maps a vector length to the EmbedDimension enum value.
-// Returns EmbedOther for any non-zero length not in the known set.
-func dimFromLen(n int) types.EmbedDimension {
-	switch n {
-	case 0:
-		return types.EmbedNone
-	case 384:
-		return types.Embed384
-	case 768:
-		return types.Embed768
-	case 1536:
-		return types.Embed1536
-	case 3072:
-		return types.Embed3072
-	default:
-		return types.EmbedOther
-	}
-}
-
 // UpdateEmbedding stores an embedding vector for an engram.
 // The wsPrefix is looked up from the engram's key scan.
 // For ERF v2, only the 0x18 embedding key is written; the full engram is not re-encoded.
@@ -165,7 +147,7 @@ func (ps *PebbleStore) UpdateEmbedding(ctx context.Context, wsPrefix [8]byte, id
 	// Patch EmbedDim in the ERF record so the UI reflects embedding status.
 	// EmbedDim lives at byte offset erf.OffsetEmbedDim (67) from the record start.
 	// PatchEmbedDim also recomputes the CRC32 trailer so the record stays valid.
-	dim := dimFromLen(len(vec))
+	dim := DimFromLen(len(vec))
 	if dim != types.EmbedNone {
 		erfKey := keys.EngramKey(wsPrefix, [16]byte(id))
 		val, closer, err := ps.db.Get(erfKey)
@@ -174,7 +156,12 @@ func (ps *PebbleStore) UpdateEmbedding(ctx context.Context, wsPrefix [8]byte, id
 			copy(buf, val)
 			closer.Close()
 
-			if patchErr := erf.PatchEmbedDim(buf, uint8(dim)); patchErr == nil {
+			if patchErr := erf.PatchEmbedDim(buf, uint8(dim)); patchErr != nil {
+				slog.Warn("UpdateEmbedding: failed to patch EmbedDim in ERF record",
+					"id", id,
+					"err", patchErr,
+				)
+			} else {
 				batch.Set(erfKey, buf, nil)
 				// Also update the 0x02 meta key so GetMetadata sees the new EmbedDim.
 				metaKey := keys.MetaKey(wsPrefix, [16]byte(id))

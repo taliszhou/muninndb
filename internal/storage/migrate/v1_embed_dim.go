@@ -5,31 +5,11 @@ import (
 	"log/slog"
 
 	"github.com/cockroachdb/pebble"
+	"github.com/scrypster/muninndb/internal/storage"
 	"github.com/scrypster/muninndb/internal/storage/erf"
 	"github.com/scrypster/muninndb/internal/storage/keys"
 	"github.com/scrypster/muninndb/internal/types"
 )
-
-// embedDimFromLen maps a quantized embedding value length (number of int8 vector bytes)
-// to an EmbedDimension constant. The embedding value format is:
-// [8 bytes quantize params] + [N bytes quantized int8], so N = len(val) - 8.
-func embedDimFromLen(n int) types.EmbedDimension {
-	switch n {
-	case 384:
-		return types.Embed384
-	case 768:
-		return types.Embed768
-	case 1536:
-		return types.Embed1536
-	case 3072:
-		return types.Embed3072
-	default:
-		if n > 0 {
-			return types.EmbedOther
-		}
-		return types.EmbedNone
-	}
-}
 
 // BackfillEmbedDim scans all embedding keys (0x18 prefix), derives the vector
 // dimension from the stored value length, and patches EmbedDim in the
@@ -63,7 +43,7 @@ func BackfillEmbedDim(db *pebble.DB) error {
 		}
 
 		vecLen := len(embedVal) - 8
-		dim := embedDimFromLen(vecLen)
+		dim := storage.DimFromLen(vecLen)
 		if dim == types.EmbedNone {
 			skipped++
 			continue

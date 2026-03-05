@@ -118,9 +118,9 @@ func TestDimFromLen(t *testing.T) {
 		{1, types.EmbedOther},
 	}
 	for _, tc := range cases {
-		got := dimFromLen(tc.n)
+		got := DimFromLen(tc.n)
 		if got != tc.want {
-			t.Errorf("dimFromLen(%d) = %d, want %d", tc.n, got, tc.want)
+			t.Errorf("DimFromLen(%d) = %d, want %d", tc.n, got, tc.want)
 		}
 	}
 }
