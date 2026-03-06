@@ -165,6 +165,28 @@ func resolveEmbedInfo(cfg plugincfg.PluginConfig) rest.EmbedInfo {
 	return rest.EmbedInfo{Provider: "none", Model: ""}
 }
 
+// resolveEnrichInfo determines the LLM enrichment provider and model from
+// env variables and saved plugin config. Order: env vars → saved config.
+func resolveEnrichInfo(cfg plugincfg.PluginConfig) rest.EnrichInfo {
+	// Env var takes precedence.
+	if enrichURL := os.Getenv("MUNINN_ENRICH_URL"); enrichURL != "" {
+		if provCfg, err := plugin.ParseProviderURL(enrichURL); err == nil {
+			return rest.EnrichInfo{Provider: string(provCfg.Scheme), Model: provCfg.Model}
+		}
+		return rest.EnrichInfo{Provider: "unknown", Model: ""}
+	}
+	// Saved config fallback.
+	if cfg.EnrichProvider != "" && cfg.EnrichProvider != "none" {
+		if cfg.EnrichURL != "" {
+			if provCfg, err := plugin.ParseProviderURL(cfg.EnrichURL); err == nil {
+				return rest.EnrichInfo{Provider: string(provCfg.Scheme), Model: provCfg.Model}
+			}
+		}
+		return rest.EnrichInfo{Provider: cfg.EnrichProvider, Model: ""}
+	}
+	return rest.EnrichInfo{}
+}
+
 // resolveOpenAIEmbedProviderURL resolves an OpenAI embed URL override into a
 // provider URL that ParseProviderURL can handle. Supports both:
 //   - openai://text-embedding-3-small?base_url=http://localhost:8080
@@ -973,7 +995,8 @@ func runServer() {
 	// Build transport servers
 	mbpServer := mbp.NewServer(*mbpAddr, eng, authStore, clientTLS)
 	corsOrigins := parseCORSOrigins(*corsOriginsFlag)
-	restServer := rest.NewServer(*restAddr, restWrapper, authStore, sessionSecret, corsOrigins, embedInfo, pluginRegistry, *dataDir, clientTLS, rest.MCPInfo{
+	enrichInfo := resolveEnrichInfo(savedPluginCfg)
+	restServer := rest.NewServer(*restAddr, restWrapper, authStore, sessionSecret, corsOrigins, embedInfo, enrichInfo, pluginRegistry, *dataDir, clientTLS, rest.MCPInfo{
 		Addr:     *mcpAddr,
 		HasToken: *mcpToken != "",
 	})
