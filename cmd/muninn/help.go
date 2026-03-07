@@ -322,7 +322,7 @@ func printHelp() {
 	fmt.Println("  MuninnDB exposes an MCP server that AI tools connect to for memory.")
 	fmt.Println("  Run " + cyan("muninn init") + " to configure Claude Desktop, Cursor, or Windsurf automatically.")
 	fmt.Println()
-	fmt.Println("  MCP endpoint: http://localhost:8750/mcp")
+	fmt.Println("  MCP endpoint: http://127.0.0.1:8750/mcp")
 	fmt.Printf("  %-28s %s\n", "MUNINN_MCP_URL", "Override MCP server URL (also used by 'muninn mcp' proxy)")
 	fmt.Printf("  %-28s %s\n", "MUNINNDB_DATA", "Override default data directory")
 	fmt.Println()

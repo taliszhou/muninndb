@@ -71,7 +71,7 @@ func runInit() {
 	}
 	fs.Parse(args)
 
-	mcpURL := "http://localhost:8750/mcp"
+	mcpURL := "http://127.0.0.1:8750/mcp"
 	isInteractive := term.IsTerminal(int(os.Stdin.Fd()))
 
 	if !isInteractive && !*yes && *toolFlag == "" {
@@ -603,7 +603,7 @@ func runNonInteractiveInit(mcpURL, toolStr, tokenStr string, noToken, noStart, y
 
 	fmt.Println()
 	fmt.Println("muninn is running.")
-	fmt.Println("  MCP endpoint:   http://localhost:8750/mcp")
+	fmt.Println("  MCP endpoint:   http://127.0.0.1:8750/mcp")
 	if token != "" {
 		fmt.Println("  Token:          ~/.muninn/mcp.token")
 	}

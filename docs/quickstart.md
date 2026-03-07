@@ -68,7 +68,7 @@ First run automatically:
 ```bash
 muninn status
 # or
-curl http://localhost:8750/mcp/health
+curl http://127.0.0.1:8750/mcp/health
 ```
 
 **Stop it:**
@@ -140,7 +140,7 @@ muninn init --tool claude --yes
 muninn init --tool cursor,claude --yes
 ```
 
-**Manual MCP config:** Point any MCP client to `http://localhost:8750/mcp`.
+**Manual MCP config:** Point any MCP client to `http://127.0.0.1:8750/mcp`.
 
 ---
 

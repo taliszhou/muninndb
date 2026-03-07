@@ -22,6 +22,9 @@ func TestHandleRPC_Initialize(t *testing.T) {
 	srv := newTestServer()
 	body := `{"jsonrpc":"2.0","method":"initialize","id":1,"params":{}}`
 	w := postRPC(t, srv, body)
+	if got := w.Header().Get(mcpSessionHeader); got == "" {
+		t.Fatal("initialize response missing Mcp-Session-Id header")
+	}
 	resp := decodeResp(t, w.Body.String())
 	if resp.Error != nil {
 		t.Fatalf("unexpected error: %v", resp.Error)
@@ -357,11 +360,11 @@ func (s *fakeSessionStore) Get(id string) (*mcpSession, bool) {
 }
 
 func (s *fakeSessionStore) Create(_ string, _ [32]byte) (string, error) { return "", nil }
-func (s *fakeSessionStore) Touch(_ string)                               {}
-func (s *fakeSessionStore) MarkInitialized(_ string) error               { return nil }
-func (s *fakeSessionStore) ByVault(_ string) []*mcpSession               { return nil }
-func (s *fakeSessionStore) DroppedCount(_ string) int64                  { return 0 }
-func (s *fakeSessionStore) Close()                                        {}
+func (s *fakeSessionStore) Touch(_ string)                              {}
+func (s *fakeSessionStore) MarkInitialized(_ string) error              { return nil }
+func (s *fakeSessionStore) ByVault(_ string) []*mcpSession              { return nil }
+func (s *fakeSessionStore) DroppedCount(_ string) int64                 { return 0 }
+func (s *fakeSessionStore) Close()                                      {}
 
 func TestSessionFromRequest_NoHeader(t *testing.T) {
 	store := newFakeSessionStore()

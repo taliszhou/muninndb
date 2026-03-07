@@ -267,7 +267,7 @@ func TestParseToolNumbers(t *testing.T) {
 		{"1 1 2", []int{1, 2}}, // deduplication
 		{"", nil},
 		{"6 7 8", []int{6, 7, 8}}, // valid range is 1-9
-		{"abc", nil},    // non-numeric
+		{"abc", nil},              // non-numeric
 	}
 	for _, tt := range tests {
 		got := parseToolNumbers(tt.input)
@@ -971,7 +971,7 @@ func TestConfigureCodexWritesConfig(t *testing.T) {
 	defer cleanup()
 
 	out := captureStdout(func() {
-		if err := configureCodex("http://localhost:8750/mcp", "mdb_testtoken"); err != nil {
+		if err := configureCodex("http://127.0.0.1:8750/mcp", "mdb_testtoken"); err != nil {
 			t.Fatalf("error: %v", err)
 		}
 	})
@@ -984,7 +984,7 @@ func TestConfigureCodexWritesConfig(t *testing.T) {
 	if !strings.Contains(content, "muninn") {
 		t.Errorf("muninn not in config: %s", content)
 	}
-	if !strings.Contains(content, "http://localhost:8750/mcp") {
+	if !strings.Contains(content, "http://127.0.0.1:8750/mcp") {
 		t.Errorf("MCP URL not in config: %s", content)
 	}
 	if !strings.Contains(content, "Bearer mdb_testtoken") {
@@ -1001,7 +1001,7 @@ func TestConfigureCodexNoToken(t *testing.T) {
 	defer cleanup()
 
 	captureStdout(func() {
-		if err := configureCodex("http://localhost:8750/mcp", ""); err != nil {
+		if err := configureCodex("http://127.0.0.1:8750/mcp", ""); err != nil {
 			t.Fatalf("error: %v", err)
 		}
 	})
@@ -1014,7 +1014,7 @@ func TestConfigureCodexNoToken(t *testing.T) {
 	if strings.Contains(content, "http_headers") {
 		t.Errorf("should not have http_headers without token: %s", content)
 	}
-	if !strings.Contains(content, "http://localhost:8750/mcp") {
+	if !strings.Contains(content, "http://127.0.0.1:8750/mcp") {
 		t.Errorf("URL missing: %s", content)
 	}
 }
@@ -1034,7 +1034,7 @@ url = "http://other.example"
 	os.WriteFile(path, []byte(existing), 0644)
 
 	captureStdout(func() {
-		configureCodex("http://localhost:8750/mcp", "tok123")
+		configureCodex("http://127.0.0.1:8750/mcp", "tok123")
 	})
 
 	data, _ := os.ReadFile(path)
@@ -1057,7 +1057,7 @@ func TestWriteCodexTOMLConfig_InvalidTOML(t *testing.T) {
 	path := filepath.Join(dir, "config.toml")
 	os.WriteFile(path, []byte("this is not valid toml = = = [[["), 0644)
 
-	_, err := writeCodexTOMLConfig(path, "http://localhost:8750/mcp", "")
+	_, err := writeCodexTOMLConfig(path, "http://127.0.0.1:8750/mcp", "")
 	if err == nil {
 		t.Fatal("expected error for invalid TOML, got nil")
 	}
@@ -1073,7 +1073,7 @@ func TestWriteCodexTOMLConfig_BackupCreated(t *testing.T) {
 	original := []byte("[mcp_servers]\n")
 	os.WriteFile(path, original, 0644)
 
-	writeCodexTOMLConfig(path, "http://localhost:8750/mcp", "")
+	writeCodexTOMLConfig(path, "http://127.0.0.1:8750/mcp", "")
 
 	bak, err := os.ReadFile(path + ".bak")
 	if err != nil {
@@ -1090,7 +1090,7 @@ func TestConfigureNamedToolsCodex(t *testing.T) {
 	defer cleanup()
 
 	out := captureStdout(func() {
-		configureNamedTools([]string{"codex"}, "http://localhost:8750/mcp", "tok123")
+		configureNamedTools([]string{"codex"}, "http://127.0.0.1:8750/mcp", "tok123")
 	})
 	if !strings.Contains(out, "✓") {
 		t.Errorf("expected success marker for codex tool, got: %s", out)
