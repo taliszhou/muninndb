@@ -746,16 +746,15 @@ func withTempHome(t *testing.T) (string, func()) {
 	}
 }
 
-// TestConfigureClaudeDesktopWritesConfig verifies Claude Desktop config is written at correct path with correct JSON.
+// TestConfigureClaudeDesktopWritesConfig verifies Claude Desktop config is written at the
+// correct path with a stdio entry (command + args), not an HTTP entry (url + headers).
+// Claude Desktop v1.1.4010+ crashes on startup if any mcpServers entry has type:"http".
 func TestConfigureClaudeDesktopWritesConfig(t *testing.T) {
 	home, cleanup := withTempHome(t)
 	defer cleanup()
 
-	mcpURL := "http://localhost:8750/mcp"
-	token := "mdb_testtoken123"
-
 	out := captureStdout(func() {
-		err := configureClaudeDesktop(mcpURL, token)
+		err := configureClaudeDesktop("http://localhost:8750/mcp", "mdb_testtoken123")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -785,15 +784,23 @@ func TestConfigureClaudeDesktopWritesConfig(t *testing.T) {
 	if !ok {
 		t.Fatalf("mcpServers.muninn not found: %s", data)
 	}
-	if muninn["url"] != mcpURL {
-		t.Errorf("url = %v, want %q", muninn["url"], mcpURL)
+
+	// Must be a stdio entry: command + args, no url/headers/type.
+	if muninn["command"] == nil || muninn["command"] == "" {
+		t.Errorf("command field missing or empty — Desktop config must use stdio transport: %s", data)
 	}
-	headers, ok := muninn["headers"].(map[string]any)
-	if !ok {
-		t.Fatalf("headers not found when token supplied: %s", data)
+	args, ok := muninn["args"].([]any)
+	if !ok || len(args) == 0 || args[0] != "mcp" {
+		t.Errorf("args should be [\"mcp\"], got %v: %s", muninn["args"], data)
 	}
-	if headers["Authorization"] != "Bearer "+token {
-		t.Errorf("Authorization = %v, want %q", headers["Authorization"], "Bearer "+token)
+	if muninn["url"] != nil {
+		t.Errorf("url must not be present in Desktop config (causes schema crash): %s", data)
+	}
+	if muninn["headers"] != nil {
+		t.Errorf("headers must not be present in Desktop config: %s", data)
+	}
+	if muninn["type"] != nil {
+		t.Errorf("type must not be present in Desktop config (causes crash): %s", data)
 	}
 
 	// Output should contain success marker
@@ -802,7 +809,8 @@ func TestConfigureClaudeDesktopWritesConfig(t *testing.T) {
 	}
 }
 
-// TestConfigureClaudeDesktopNoToken verifies no auth header is written when token is empty.
+// TestConfigureClaudeDesktopNoToken verifies Desktop config is still stdio even when no token.
+// The token is read at runtime by muninn mcp, so it never appears in the config file.
 func TestConfigureClaudeDesktopNoToken(t *testing.T) {
 	_, cleanup := withTempHome(t)
 	defer cleanup()
@@ -819,8 +827,15 @@ func TestConfigureClaudeDesktopNoToken(t *testing.T) {
 	servers := cfg["mcpServers"].(map[string]any)
 	muninn := servers["muninn"].(map[string]any)
 
-	if _, hasHeaders := muninn["headers"]; hasHeaders {
-		t.Error("headers should not be present when token is empty")
+	// stdio entry: command present, no url/headers regardless of token presence.
+	if muninn["command"] == nil {
+		t.Error("command field missing — Desktop config must use stdio transport")
+	}
+	if muninn["url"] != nil {
+		t.Error("url must not be present in Desktop config")
+	}
+	if muninn["headers"] != nil {
+		t.Error("headers must not be present in Desktop config")
 	}
 }
 
