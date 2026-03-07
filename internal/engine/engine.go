@@ -1624,6 +1624,7 @@ func (e *Engine) activateCore(ctx context.Context, req *mbp.ActivateRequest, str
 			ID:          scored.Engram.ID.String(),
 			Concept:     scored.Engram.Concept,
 			Content:     scored.Engram.Content,
+			Summary:     scored.Engram.Summary,
 			Score:       float32(scored.Score),
 			Confidence:  scored.Engram.Confidence,
 			Why:         scored.Why,

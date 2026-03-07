@@ -246,3 +246,80 @@ func TestConvertReadResponseToMemory(t *testing.T) {
 		t.Errorf("tags len = %d, want 2", len(m.Tags))
 	}
 }
+
+// TestReadResponseToMemory_FullContent verifies muninn_read returns full content
+// without truncation — regression guard for issue #112.
+func TestReadResponseToMemory_FullContent(t *testing.T) {
+	long := make([]byte, 2000)
+	for i := range long {
+		long[i] = 'y'
+	}
+	resp := &mbp.ReadResponse{
+		ID:      "full-read",
+		Content: string(long),
+	}
+	m := readResponseToMemory(resp)
+	if len(m.Content) != 2000 {
+		t.Errorf("readResponseToMemory truncated content: got len %d, want 2000", len(m.Content))
+	}
+}
+
+// TestReadResponseToMemory_MapsummaryField verifies that Summary from the read
+// response is propagated to the Memory.
+func TestReadResponseToMemory_MapsSummaryField(t *testing.T) {
+	resp := &mbp.ReadResponse{
+		ID:      "sum-read",
+		Content: "full content here",
+		Summary: "short summary",
+	}
+	m := readResponseToMemory(resp)
+	if m.Summary != "short summary" {
+		t.Errorf("Summary = %q, want %q", m.Summary, "short summary")
+	}
+	if m.Content != "full content here" {
+		t.Errorf("Content = %q, want full content", m.Content)
+	}
+}
+
+// TestActivationToMemory_PrefersSummary verifies that muninn_recall uses the
+// enrichment summary when present instead of the truncated content preview.
+func TestActivationToMemory_PrefersSummary(t *testing.T) {
+	item := &mbp.ActivationItem{
+		ID:      "recall-with-summary",
+		Concept: "concept",
+		Content: "this is the full long content that goes well beyond any preview limit",
+		Summary: "short enriched summary",
+	}
+	m := activationToMemory(item)
+	if m.Summary != "short enriched summary" {
+		t.Errorf("Summary = %q, want %q", m.Summary, "short enriched summary")
+	}
+	// Content field should carry the summary as the display value when present.
+	if m.Content != "short enriched summary" {
+		t.Errorf("Content (display) = %q, want summary %q", m.Content, "short enriched summary")
+	}
+}
+
+// TestActivationToMemory_FallsBackToTruncated verifies that when no summary
+// exists, muninn_recall falls back to a truncated content preview.
+func TestActivationToMemory_FallsBackToTruncated(t *testing.T) {
+	long := make([]byte, 800)
+	for i := range long {
+		long[i] = 'z'
+	}
+	item := &mbp.ActivationItem{
+		ID:      "recall-no-summary",
+		Content: string(long),
+		Summary: "",
+	}
+	m := activationToMemory(item)
+	if m.Summary != "" {
+		t.Errorf("Summary should be empty, got %q", m.Summary)
+	}
+	if len(m.Content) > contentPreviewLen+3 {
+		t.Errorf("Content not truncated: len=%d", len(m.Content))
+	}
+	if m.Content[len(m.Content)-3:] != "..." {
+		t.Error("truncated content must end with '...'")
+	}
+}

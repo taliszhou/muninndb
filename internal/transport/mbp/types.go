@@ -201,6 +201,7 @@ type ActivationItem struct {
 	ID              string          `msgpack:"id"                          json:"id"`
 	Concept         string          `msgpack:"concept"                     json:"concept"`
 	Content         string          `msgpack:"content"                     json:"content"`
+	Summary         string          `msgpack:"summary,omitempty"           json:"summary,omitempty"`
 	Score           float32         `msgpack:"score"                       json:"score"`
 	Confidence      float32         `msgpack:"confidence"                  json:"confidence"`
 	ScoreComponents ScoreComponents `msgpack:"score_components,omitempty"  json:"score_components,omitempty"`

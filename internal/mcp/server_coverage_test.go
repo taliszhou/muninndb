@@ -276,6 +276,8 @@ func TestResolveVault_NoSession_NoArg(t *testing.T) {
 
 // ── convert.go: readResponseToMemory long content ─────────────────────────────
 
+// TestReadResponseToMemory_LongContent verifies that muninn_read returns the
+// full content without truncation — issue #112 behavior change.
 func TestReadResponseToMemory_LongContent(t *testing.T) {
 	longContent := strings.Repeat("x", 501)
 	resp := &mbp.ReadResponse{
@@ -283,11 +285,11 @@ func TestReadResponseToMemory_LongContent(t *testing.T) {
 		Content: longContent,
 	}
 	mem := readResponseToMemory(resp)
-	if len(mem.Content) > contentMaxLen+3 { // +3 for "..."
-		t.Errorf("content should be truncated, got len=%d", len(mem.Content))
+	if len(mem.Content) != 501 {
+		t.Errorf("readResponseToMemory should return full content: got len=%d, want 501", len(mem.Content))
 	}
-	if !strings.HasSuffix(mem.Content, "...") {
-		t.Error("truncated content should end with '...'")
+	if strings.HasSuffix(mem.Content, "...") {
+		t.Error("readResponseToMemory must not truncate content (issue #112)")
 	}
 }
 
