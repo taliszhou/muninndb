@@ -2188,3 +2188,46 @@ func TestBatchGetEngramLinks_EngineError(t *testing.T) {
 		t.Fatalf("want 500 got %d", w.Code)
 	}
 }
+
+// --- Bug #145: memory_type omitempty ---
+
+// memoryTypeZeroEngine returns a ReadResponse where MemoryType is 0 (fact — the default).
+type memoryTypeZeroEngine struct{ MockEngine }
+
+func (e *memoryTypeZeroEngine) Read(ctx context.Context, req *ReadRequest) (*ReadResponse, error) {
+	return &ReadResponse{
+		ID:         "test-id",
+		Concept:    "test",
+		Content:    "test content",
+		Confidence: 0.9,
+		MemoryType: 0, // fact type — zero value that omitempty would suppress
+	}, nil
+}
+
+// TestReadResponse_MemoryTypeZeroIncludedInJSON verifies that memory_type=0 (fact)
+// is always present in the JSON response body. Previously, json:"memory_type,omitempty"
+// caused the field to be silently omitted for fact memories, making them
+// indistinguishable from responses that don't carry a memory type at all.
+func TestReadResponse_MemoryTypeZeroIncludedInJSON(t *testing.T) {
+	server := NewServer("localhost:8080", &memoryTypeZeroEngine{}, nil, nil, nil, EmbedInfo{}, EnrichInfo{}, nil, "", nil)
+
+	req := httptest.NewRequest("GET", "/api/engrams/test-id?vault=default", nil)
+	w := httptest.NewRecorder()
+	server.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Decode into a raw map to verify presence of the key (not just its value).
+	var raw map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&raw); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if _, ok := raw["memory_type"]; !ok {
+		t.Error("memory_type missing from JSON response — zero value (fact type) must always be serialized")
+	}
+	if val, _ := raw["memory_type"].(float64); val != 0 {
+		t.Errorf("memory_type: want 0, got %v", raw["memory_type"])
+	}
+}

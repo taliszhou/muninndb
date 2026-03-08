@@ -568,9 +568,7 @@ func (s *Server) handleCreateEngram(w http.ResponseWriter, r *http.Request) {
 		s.sendError(r, w, http.StatusBadRequest, ErrInvalidEngram, "invalid request body")
 		return
 	}
-	if req.Vault == "" {
-		req.Vault = ctxVault(r)
-	}
+	req.Vault = ctxVault(r)
 	resp, err := s.engine.Write(r.Context(), &req)
 	if err != nil {
 		s.sendError(r, w, http.StatusInternalServerError, ErrStorageError, err.Error())
@@ -597,10 +595,9 @@ func (s *Server) handleBatchCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	reqs := make([]*WriteRequest, len(body.Engrams))
+	vault := ctxVault(r)
 	for i := range body.Engrams {
-		if body.Engrams[i].Vault == "" {
-			body.Engrams[i].Vault = ctxVault(r)
-		}
+		body.Engrams[i].Vault = vault
 		reqs[i] = &body.Engrams[i]
 	}
 
@@ -665,9 +662,7 @@ func (s *Server) handleActivate(w http.ResponseWriter, r *http.Request) {
 		s.sendError(r, w, http.StatusBadRequest, ErrInvalidEngram, "invalid request body")
 		return
 	}
-	if req.Vault == "" {
-		req.Vault = ctxVault(r)
-	}
+	req.Vault = ctxVault(r)
 	// Apply recall mode preset if provided.
 	if req.Mode != "" {
 		preset, err := auth.LookupRecallMode(req.Mode)
@@ -728,9 +723,7 @@ func (s *Server) handleLink(w http.ResponseWriter, r *http.Request) {
 		s.sendError(r, w, http.StatusBadRequest, ErrInvalidEngram, "invalid request body")
 		return
 	}
-	if req.Vault == "" {
-		req.Vault = ctxVault(r)
-	}
+	req.Vault = ctxVault(r)
 	mbpReq := &mbp.LinkRequest{
 		SourceID: req.SourceID,
 		TargetID: req.TargetID,
@@ -1108,9 +1101,7 @@ func (s *Server) handleBatchGetEngramLinks(w http.ResponseWriter, r *http.Reques
 		s.sendError(r, w, http.StatusBadRequest, ErrInvalidEngram, "'ids' exceeds maximum batch size of 200")
 		return
 	}
-	if req.Vault == "" {
-		req.Vault = ctxVault(r)
-	}
+	req.Vault = ctxVault(r)
 	resp, err := s.engine.GetBatchEngramLinks(r.Context(), &req)
 	if err != nil {
 		s.sendError(r, w, http.StatusInternalServerError, ErrStorageError, err.Error())

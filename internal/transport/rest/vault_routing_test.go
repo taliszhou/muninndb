@@ -769,3 +769,103 @@ func TestVaultRouting_ResolveContradiction_ExplicitVault(t *testing.T) {
 		t.Errorf("engine ResolveContradiction vault: want %q, got %q", "myvault", eng.lastResolveContradictionVault)
 	}
 }
+
+// --- Bug #145: body vault bypass ---
+
+// TestVaultRouting_Write_BodyVaultIgnored verifies that a "vault" field in the
+// POST /api/engrams request body cannot override the auth-middleware vault.
+// A key scoped to "default" must not be able to write to "othervault" by
+// setting "vault":"othervault" in the JSON body.
+func TestVaultRouting_Write_BodyVaultIgnored(t *testing.T) {
+	srv, eng, _ := newVaultTrackingServer(t)
+
+	// Body contains vault:"othervault" but the auth middleware resolves "default".
+	body := strings.NewReader(`{"concept":"test","content":"hello","vault":"othervault"}`)
+	req := httptest.NewRequest("POST", "/api/engrams", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if eng.lastWriteVault != "default" {
+		t.Errorf("body vault must be ignored: engine Write vault = %q, want %q", eng.lastWriteVault, "default")
+	}
+}
+
+// TestVaultRouting_BatchCreate_BodyVaultIgnored verifies that per-item "vault"
+// fields in POST /api/engrams/batch cannot override the auth-middleware vault.
+func TestVaultRouting_BatchCreate_BodyVaultIgnored(t *testing.T) {
+	srv, eng, _ := newVaultTrackingServer(t)
+
+	body := strings.NewReader(`{"engrams":[{"concept":"a","content":"b","vault":"othervault"},{"concept":"c","content":"d","vault":"thirdfault"}]}`)
+	req := httptest.NewRequest("POST", "/api/engrams/batch", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if eng.lastWriteBatchVault != "default" {
+		t.Errorf("per-item body vault must be ignored: engine WriteBatch vault = %q, want %q", eng.lastWriteBatchVault, "default")
+	}
+}
+
+// TestVaultRouting_Activate_BodyVaultIgnored verifies that a "vault" field in
+// the POST /api/activate body cannot override the auth-middleware vault.
+func TestVaultRouting_Activate_BodyVaultIgnored(t *testing.T) {
+	srv, eng, _ := newVaultTrackingServer(t)
+
+	body := strings.NewReader(`{"context":["something"],"vault":"othervault"}`)
+	req := httptest.NewRequest("POST", "/api/activate", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if eng.lastActivateVault != "default" {
+		t.Errorf("body vault must be ignored: engine Activate vault = %q, want %q", eng.lastActivateVault, "default")
+	}
+}
+
+// TestVaultRouting_Link_BodyVaultIgnored verifies that a "vault" field in
+// the POST /api/link body cannot override the auth-middleware vault.
+func TestVaultRouting_Link_BodyVaultIgnored(t *testing.T) {
+	srv, eng, _ := newVaultTrackingServer(t)
+
+	body := strings.NewReader(`{"source_id":"a","target_id":"b","vault":"othervault"}`)
+	req := httptest.NewRequest("POST", "/api/link", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if eng.lastLinkVault != "default" {
+		t.Errorf("body vault must be ignored: engine Link vault = %q, want %q", eng.lastLinkVault, "default")
+	}
+}
+
+// TestVaultRouting_BatchGetEngramLinks_BodyVaultIgnored verifies that a "vault"
+// field in the POST /api/engrams/links/batch body cannot override the auth-middleware vault.
+func TestVaultRouting_BatchGetEngramLinks_BodyVaultIgnored(t *testing.T) {
+	srv, eng, _ := newVaultTrackingServer(t)
+
+	body := strings.NewReader(`{"ids":["01JAAAAAAAAAAAAAAAAAAAAAA1"],"vault":"othervault"}`)
+	req := httptest.NewRequest("POST", "/api/engrams/links/batch", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if eng.lastGetBatchEngramLinksVault != "default" {
+		t.Errorf("body vault must be ignored: engine GetBatchEngramLinks vault = %q, want %q", eng.lastGetBatchEngramLinksVault, "default")
+	}
+}

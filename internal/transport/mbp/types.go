@@ -86,7 +86,7 @@ type WriteRequest struct {
 	Embedding    []float32     `msgpack:"embedding,omitempty" json:"embedding,omitempty"`
 	Vault        string        `msgpack:"vault,omitempty" json:"vault,omitempty"`
 	IdempotentID string        `msgpack:"idempotent_id,omitempty" json:"idempotent_id,omitempty"`
-	MemoryType   uint8         `msgpack:"memory_type,omitempty" json:"memory_type,omitempty"`
+	MemoryType   uint8         `msgpack:"memory_type,omitempty" json:"memory_type"`
 	TypeLabel    string        `msgpack:"type_label,omitempty" json:"type_label,omitempty"`
 
 	// Inline enrichment: caller-provided data that bypasses background enrichment.
@@ -124,7 +124,7 @@ type ReadResponse struct {
 	LastAccess     int64    `msgpack:"last_access"           json:"last_access"`
 	Summary        string   `msgpack:"summary,omitempty"     json:"summary,omitempty"`
 	KeyPoints      []string `msgpack:"key_points,omitempty"  json:"key_points,omitempty"`
-	MemoryType     uint8    `msgpack:"memory_type,omitempty" json:"memory_type,omitempty"`
+	MemoryType     uint8    `msgpack:"memory_type,omitempty" json:"memory_type"`
 	TypeLabel      string   `msgpack:"type_label,omitempty"  json:"type_label,omitempty"`
 	Classification uint16   `msgpack:"classification,omitempty" json:"classification,omitempty"`
 	// EmbedDim is the stored embedding dimensionality code (0 = no embedding).
