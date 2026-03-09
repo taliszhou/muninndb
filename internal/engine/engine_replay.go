@@ -2,10 +2,12 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
 	"github.com/scrypster/muninndb/internal/plugin"
+	"github.com/scrypster/muninndb/internal/plugin/enrich"
 	"github.com/scrypster/muninndb/internal/storage"
 )
 
@@ -154,9 +156,13 @@ func (e *Engine) ReplayEnrichment(ctx context.Context, vault string, stages []st
 		}
 
 		// Run enrichment for this engram.
-		// plugin.Engram is an alias for storage.Engram, so eng is passed directly.
 		result, enrichErr := e.enrichPlugin.Enrich(ctx, eng)
 		if enrichErr != nil {
+			if errors.Is(enrichErr, enrich.ErrNothingToEnrich) {
+				slog.Debug("replay enrichment: nothing to enrich, skipping", "id", eng.ID.String())
+				skipped++
+				continue
+			}
 			slog.Warn("replay enrichment: enrich failed, skipping",
 				"id", eng.ID.String(), "err", enrichErr)
 			failed++

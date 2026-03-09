@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/scrypster/muninndb/internal/plugin"
+	"github.com/scrypster/muninndb/internal/plugin/enrich"
 	"github.com/scrypster/muninndb/internal/storage"
 	"github.com/scrypster/muninndb/internal/transport/mbp"
 )
@@ -120,7 +121,6 @@ func TestReplayEnrichment_SkipsAlreadyEnriched(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseULID: %v", err)
 	}
-	allFlags := plugin.DigestEntities | plugin.DigestRelationships | plugin.DigestClassified | plugin.DigestSummarized
 	for _, flag := range []uint8{
 		plugin.DigestEntities,
 		plugin.DigestRelationships,
@@ -131,7 +131,6 @@ func TestReplayEnrichment_SkipsAlreadyEnriched(t *testing.T) {
 			t.Fatalf("SetDigestFlag(0x%02x): %v", flag, err)
 		}
 	}
-	_ = allFlags
 
 	mock := &mockEnrichPlugin{}
 	eng.SetEnrichPlugin(mock)
@@ -379,6 +378,9 @@ func TestReplayEnrichment_FailedCount(t *testing.T) {
 	if result.Processed != 2 {
 		t.Errorf("Processed: got %d, want 2", result.Processed)
 	}
+	if result.Skipped != 0 {
+		t.Errorf("Skipped: got %d, want 0", result.Skipped)
+	}
 	if result.Failed != 1 {
 		t.Errorf("Failed: got %d, want 1", result.Failed)
 	}
@@ -436,6 +438,52 @@ func TestReplayEnrichment_ContextCancellation(t *testing.T) {
 	assertResultInvariant(t, result, 5)
 }
 
+// TestReplayEnrichment_NothingToEnrich_CountedAsSkipped verifies that when the
+// enrich plugin returns ErrNothingToEnrich (wrapped), the engram is counted as
+// Skipped (not Failed).
+func TestReplayEnrichment_NothingToEnrich_CountedAsSkipped(t *testing.T) {
+	eng, cleanup := testEnv(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	writeTestEngrams(t, ctx, eng, "default", 3)
+
+	// Mock: engrams 1 and 3 succeed, engram 2 returns a wrapped ErrNothingToEnrich.
+	callCount := 0
+	mock := &mockEnrichPlugin{
+		enrichFn: func(_ context.Context, _ *storage.Engram) (*plugin.EnrichmentResult, error) {
+			callCount++
+			if callCount == 2 {
+				return nil, fmt.Errorf("inline data covers all stages: %w", enrich.ErrNothingToEnrich)
+			}
+			return &plugin.EnrichmentResult{
+				Summary:   "mock summary",
+				KeyPoints: []string{"kp1"},
+			}, nil
+		},
+	}
+	eng.SetEnrichPlugin(mock)
+
+	result, err := eng.ReplayEnrichment(ctx, "default", nil, 50, false)
+	if err != nil {
+		t.Fatalf("ReplayEnrichment: %v", err)
+	}
+
+	if result.Processed != 2 {
+		t.Errorf("Processed: got %d, want 2", result.Processed)
+	}
+	if result.Skipped != 1 {
+		t.Errorf("Skipped: got %d, want 1", result.Skipped)
+	}
+	if result.Failed != 0 {
+		t.Errorf("Failed: got %d, want 0", result.Failed)
+	}
+	if result.Remaining != 0 {
+		t.Errorf("Remaining: got %d, want 0", result.Remaining)
+	}
+	assertResultInvariant(t, result, 3)
+}
+
 // TestReplayEnrichment_ContextAlreadyExpired verifies that when the context is
 // already cancelled before the loop starts, all engrams are counted as Remaining.
 func TestReplayEnrichment_ContextAlreadyExpired(t *testing.T) {
@@ -458,6 +506,9 @@ func TestReplayEnrichment_ContextAlreadyExpired(t *testing.T) {
 
 	if result.Processed != 0 {
 		t.Errorf("Processed: got %d, want 0", result.Processed)
+	}
+	if result.Skipped != 0 {
+		t.Errorf("Skipped: got %d, want 0", result.Skipped)
 	}
 	if result.Failed != 0 {
 		t.Errorf("Failed: got %d, want 0", result.Failed)
