@@ -137,6 +137,7 @@ func (e *Engine) ReplayEnrichment(ctx context.Context, vault string, stages []st
 				Failed:    failed,
 				Remaining: countNonNilEngrams(engrams[i:]),
 				StagesRun: validStages,
+				DryRun:    false,
 			}, nil
 		}
 
@@ -249,6 +250,7 @@ func (e *Engine) ReplayEnrichment(ctx context.Context, vault string, stages []st
 		Skipped:   skipped,
 		Failed:    failed,
 		StagesRun: validStages,
+		DryRun:    false,
 	}, nil
 }
 
