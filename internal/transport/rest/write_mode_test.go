@@ -21,6 +21,12 @@ func withFullCtx(r *http.Request) *http.Request {
 	return r.WithContext(ctx)
 }
 
+func withObserveCtx(r *http.Request) *http.Request {
+	ctx := context.WithValue(r.Context(), auth.ContextMode, "observe")
+	ctx = context.WithValue(ctx, auth.ContextVault, "default")
+	return r.WithContext(ctx)
+}
+
 func newWriteModeTestServer(t *testing.T) *Server {
 	t.Helper()
 	store := newTestAuthStore(t)
@@ -131,6 +137,57 @@ func TestWriteOnlyMode_FullModeCanRead(t *testing.T) {
 			auth.WriteOnlyGuard(tc.handler)(w, req)
 			if w.Code == http.StatusForbidden {
 				t.Errorf("%s: full mode should not return 403", tc.name)
+			}
+		})
+	}
+}
+
+// TestWriteOnlyMode_ObserveModeCanRead verifies that observe-mode sessions
+// pass through WriteOnlyGuard (observe-mode read access is preserved).
+func TestWriteOnlyMode_ObserveModeCanRead(t *testing.T) {
+	s := newWriteModeTestServer(t)
+
+	cases := []struct {
+		name    string
+		handler http.HandlerFunc
+	}{
+		{"ListVaults", s.handleListVaults},
+		{"Stats", s.handleStats},
+		{"Guide", s.handleGuide},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/", nil)
+			req = withObserveCtx(req)
+			w := httptest.NewRecorder()
+			auth.WriteOnlyGuard(tc.handler)(w, req)
+			if w.Code == http.StatusForbidden {
+				t.Errorf("%s: observe mode must not return 403", tc.name)
+			}
+		})
+	}
+}
+
+// TestWriteOnlyGuard_UnknownModePassesThrough verifies that unrecognised or
+// empty mode strings are treated as non-write-only (pass through the guard).
+// WriteOnlyGuard uses exact-equality so garbage values are safe by default.
+func TestWriteOnlyGuard_UnknownModePassesThrough(t *testing.T) {
+	sentinel := http.StatusTeapot
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(sentinel)
+	})
+	guarded := auth.WriteOnlyGuard(inner)
+
+	for _, mode := range []string{"", "unknown", "WRITE", "Write", "admin"} {
+		t.Run("mode="+mode, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/", nil)
+			ctx := context.WithValue(req.Context(), auth.ContextMode, mode)
+			req = req.WithContext(ctx)
+			w := httptest.NewRecorder()
+			guarded(w, req)
+			if w.Code != sentinel {
+				t.Errorf("mode %q: expected pass-through (%d), got %d", mode, sentinel, w.Code)
 			}
 		})
 	}
