@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -146,6 +147,57 @@ func TestBug175_SettingsPersistAllFields(t *testing.T) {
 	}
 	if saved.ReconcileHeal != false {
 		t.Errorf("ReconcileHeal = %v, want false (regression: issue #175)", saved.ReconcileHeal)
+	}
+}
+
+// TestBug175_GetSettingsReturnsPersistedValues verifies that GET /api/admin/cluster/settings
+// returns the values previously saved via PUT, not stale defaults. This is the server-side
+// counterpart of the UI regression guard: if this fails, the form would always show defaults.
+func TestBug175_GetSettingsReturnsPersistedValues(t *testing.T) {
+	dataDir := t.TempDir()
+	s := NewServer("localhost:0", &MockEngine{}, nil, nil, nil, EmbedInfo{}, EnrichInfo{}, nil, dataDir, nil)
+
+	// Enable cluster so cluster.yaml exists.
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/api/admin/cluster/enable",
+		strings.NewReader(`{"role":"primary","bind_addr":"127.0.0.1:8474"}`))
+	r.Header.Set("Content-Type", "application/json")
+	s.mux.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("enable cluster: %d: %s", w.Code, w.Body.String())
+	}
+
+	// PUT specific values.
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest("PUT", "/api/admin/cluster/settings",
+		strings.NewReader(`{"heartbeat_ms":800,"sdown_beats":7,"ccs_interval_seconds":45,"reconcile_on_heal":false}`))
+	r.Header.Set("Content-Type", "application/json")
+	s.mux.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT settings: %d: %s", w.Code, w.Body.String())
+	}
+
+	// GET and verify the response body reflects what was saved.
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest("GET", "/api/admin/cluster/settings", nil)
+	s.mux.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET settings: %d: %s", w.Code, w.Body.String())
+	}
+	var got map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode GET response: %v", err)
+	}
+	checks := map[string]any{
+		"heartbeat_ms":         float64(800),
+		"sdown_beats":          float64(7),
+		"ccs_interval_seconds": float64(45),
+		"reconcile_on_heal":    false,
+	}
+	for field, want := range checks {
+		if got[field] != want {
+			t.Errorf("GET settings: %s = %v, want %v", field, got[field], want)
+		}
 	}
 }
 

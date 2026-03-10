@@ -2047,7 +2047,7 @@ Authorization = "Bearer &lt;token from %USERPROFILE%\.muninn\mcp.token&gt;"</pre
           <button @click="clusterSubTab = 'management'; startClusterFeed()"
             :style="clusterSubTab === 'management' ? 'border-bottom:2px solid var(--accent);font-weight:600;opacity:1;' : 'opacity:0.6;'"
             style="padding:0.5rem 1rem;font-size:0.875rem;background:none;border:none;cursor:pointer;color:var(--text-primary);transition:opacity 0.15s;">Management</button>
-          <button @click="clusterSubTab = 'settings'; loadClusterToken(); stopClusterFeed()"
+          <button @click="clusterSubTab = 'settings'; loadClusterToken(); loadClusterSettings(); stopClusterFeed()"
             :style="clusterSubTab === 'settings' ? 'border-bottom:2px solid var(--accent);font-weight:600;opacity:1;' : 'opacity:0.6;'"
             style="padding:0.5rem 1rem;font-size:0.875rem;background:none;border:none;cursor:pointer;color:var(--text-primary);transition:opacity 0.15s;">Settings</button>
         </div>
