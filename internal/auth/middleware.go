@@ -64,7 +64,7 @@ func (s *Store) VaultAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		ctx := context.WithValue(r.Context(), ContextVault, vault)
-		ctx = context.WithValue(ctx, ContextMode, "observe")
+		ctx = context.WithValue(ctx, ContextMode, ModeObserve)
 		next(w, r.WithContext(ctx))
 	}
 }
@@ -111,7 +111,7 @@ func (s *Store) VaultAuthWithAdminBypass(secret []byte, next http.HandlerFunc) h
 				vault = "default"
 			}
 			ctx := context.WithValue(r.Context(), ContextVault, vault)
-			ctx = context.WithValue(ctx, ContextMode, "write")
+			ctx = context.WithValue(ctx, ContextMode, ModeFull)
 			next(w, r.WithContext(ctx))
 			return
 		}
@@ -120,11 +120,47 @@ func (s *Store) VaultAuthWithAdminBypass(secret []byte, next http.HandlerFunc) h
 	}
 }
 
-// ObserveFromContext returns true if the request is in observe mode.
+// Mode enforcement uses two layers — documented here for future reference:
+//
+//   "observe" mode — engine-layer enforcement: reads are allowed but cognitive
+//   mutations (Hebbian associations, predictive activation) are suppressed via
+//   ObserveFromContext. The engine decides what to skip.
+//
+//   "write" mode (ingest-only) — middleware-layer enforcement: read endpoints
+//   return 403 before the engine is called at all. WriteOnlyGuard is applied at
+//   route registration in transport/rest/server.go.
+
+// ObserveFromContext returns true if the request is in observe (read-only) mode.
 // Engine activation handlers use this to skip cognitive state mutations.
 func ObserveFromContext(ctx context.Context) bool {
 	mode, _ := ctx.Value(ContextMode).(string)
-	return mode == "observe"
+	return mode == ModeObserve
+}
+
+// WriteOnlyFromContext returns true if the request is in write-only (ingest) mode.
+// Write-only keys may call mutation endpoints but not read endpoints.
+func WriteOnlyFromContext(ctx context.Context) bool {
+	mode, _ := ctx.Value(ContextMode).(string)
+	return mode == ModeWrite
+}
+
+// WriteOnlyGuard is HTTP middleware that returns 403 for write-only mode requests.
+// Apply it at route registration for every read endpoint:
+//
+//	mux.HandleFunc("GET /api/engrams/{id}", s.withMiddleware(auth.WriteOnlyGuard(s.handleGetEngram)))
+//
+// Scope: this guard applies to the REST API only. The MCP server uses a separate
+// static-token auth model; write-only API keys cannot authenticate to MCP at all.
+func WriteOnlyGuard(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if WriteOnlyFromContext(r.Context()) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"error":{"code":"FORBIDDEN","message":"write-only key cannot read"}}`))
+			return
+		}
+		next(w, r)
+	}
 }
 
 func resolveRequestVault(r *http.Request, defaultVault string) (string, error) {

@@ -86,6 +86,11 @@ type ClusterCoordinator struct {
 	// nodeState tracks whether the coordinator is in normal or draining mode.
 	nodeState atomic.Uint32
 
+	// reconcileOnHeal controls whether post-partition reconciliation fires when a peer
+	// recovers from SDOWN. Hot-reloadable via SetReconcileOnHeal.
+	// 1 = enabled (default), 0 = disabled.
+	reconcileOnHeal atomic.Uint32
+
 	// ccsProbe measures Cognitive Consistency Score across cluster nodes.
 	// Set via SetCCSProbe after the coordinator is created.
 	ccsProbe *CCSProbe
@@ -161,6 +166,8 @@ func NewClusterCoordinator(
 		streamers:   make(map[string]context.CancelFunc),
 		reconDelay:  reconDelay,
 	}
+	// Default reconcile-on-heal to enabled; matches config default (ReconcileHeal=true).
+	c.reconcileOnHeal.Store(1)
 
 	// Wire token manager when a cluster secret is configured.
 	if cfg.ClusterSecret != "" {
@@ -216,7 +223,7 @@ func NewClusterCoordinator(
 					Addr:   p.Addr,
 					Role:   p.Role,
 				})
-				if c.reconciler != nil {
+				if c.reconciler != nil && c.reconcileOnHeal.Load() == 1 {
 					go func() {
 						time.Sleep(c.reconDelay)
 						if !c.IsLeader() {
@@ -296,8 +303,11 @@ func (c *ClusterCoordinator) Run(ctx context.Context) error {
 	mspCtx, mspCancel := context.WithCancel(ctx)
 	defer mspCancel()
 
-	// missedThreshold=3: SDOWN after 3 missed heartbeat intervals.
-	const mspMissedThreshold = 3
+	// mspMissedThreshold: SDOWN after N missed heartbeat intervals (from config, default 3).
+	mspMissedThreshold := c.cfg.SDOWNBeats
+	if mspMissedThreshold <= 0 {
+		mspMissedThreshold = 3
+	}
 	go func() {
 		if err := c.msp.Run(mspCtx, heartbeat, mspMissedThreshold); err != nil && !errors.Is(err, context.Canceled) {
 			slog.Error("cluster: MSP exited with error", "err", err)
@@ -348,6 +358,12 @@ func (c *ClusterCoordinator) runAsCortex(ctx context.Context) error {
 		c.election.currentLeader = c.cfg.NodeID
 		c.election.mu.Unlock()
 		c.handlePromotion(currentEpoch)
+		// Clear the crash-recovery breadcrumb now that in-memory promotion is
+		// complete. Without this, every subsequent clean restart re-enters this
+		// path instead of going through a normal election. (#176)
+		if err := c.epochStore.PersistRole(""); err != nil {
+			slog.Warn("cluster: failed to clear persisted role after crash-recovery", "err", err)
+		}
 		<-ctx.Done()
 		return ctx.Err()
 	}
@@ -1265,7 +1281,20 @@ func (c *ClusterCoordinator) HandleHandoff(fromNodeID string, payload []byte) er
 	if !ok {
 		return fmt.Errorf("HandleHandoff: cannot send ack, peer %q not found", fromNodeID)
 	}
-	return peer.Send(mbp.TypeHandoffAck, ackPayload)
+	if err := peer.Send(mbp.TypeHandoffAck, ackPayload); err != nil {
+		return fmt.Errorf("HandleHandoff: send ack: %w", err)
+	}
+
+	// ACK delivered. The old Cortex will now demote itself. Clear the crash-recovery
+	// breadcrumb so that a subsequent clean restart goes through a normal election
+	// rather than incorrectly re-entering the crash-recovery path. (#176)
+	// If this clear fails, the breadcrumb remains. On the next restart, crash-recovery
+	// fires again — which is safe (idempotent re-promotion) rather than leaving the
+	// cluster without a leader.
+	if err := c.epochStore.PersistRole(""); err != nil {
+		slog.Warn("cluster: failed to clear persisted role after handoff ack", "err", err)
+	}
+	return nil
 }
 
 // SetReconciler wires a Reconciler into the coordinator.
@@ -1284,6 +1313,26 @@ func (c *ClusterCoordinator) SetMOL(mol *wal.MOL) {
 		panic("SetMOL called after Run()")
 	}
 	c.mol = mol
+}
+
+// SetReconcileOnHeal controls whether post-partition reconciliation fires when a
+// peer recovers from SDOWN. Safe to call at any time (hot-reloadable).
+func (c *ClusterCoordinator) SetReconcileOnHeal(enabled bool) {
+	if enabled {
+		c.reconcileOnHeal.Store(1)
+	} else {
+		c.reconcileOnHeal.Store(0)
+	}
+}
+
+// GetClusterConfig returns the in-memory cluster config.
+func (c *ClusterCoordinator) GetClusterConfig() *config.ClusterConfig {
+	return c.cfg
+}
+
+// CCSProbe returns the CCSProbe, or nil if not configured.
+func (c *ClusterCoordinator) CCSProbe() *CCSProbe {
+	return c.ccsProbe
 }
 
 // IncrementSnapshotCount marks the start of a snapshot transfer.

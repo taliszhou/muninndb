@@ -90,7 +90,7 @@ func (s *MCPServer) handleRemember(ctx context.Context, w http.ResponseWriter, i
 			slog.Warn("mcp: failed to record idempotency receipt", "op_id", opID, "engram_id", resp.ID, "err", err)
 		}
 	}
-	result := WriteResult{ID: resp.ID}
+	result := WriteResult{ID: resp.ID, Concept: req.Concept}
 	if len(content) > 500 {
 		result.Hint = "Tip: memories work best when each one captures a single concept. For future writes, consider using muninn_remember_batch to store multiple focused memories at once."
 	}
@@ -169,18 +169,19 @@ func (s *MCPServer) handleRememberBatch(ctx context.Context, w http.ResponseWrit
 	responses, errs := s.engine.WriteBatch(ctx, reqs)
 
 	type batchItemResult struct {
-		Index  int    `json:"index"`
-		ID     string `json:"id,omitempty"`
-		Status string `json:"status"`
-		Error  string `json:"error,omitempty"`
-		Hint   string `json:"hint,omitempty"`
+		Index   int    `json:"index"`
+		ID      string `json:"id,omitempty"`
+		Concept string `json:"concept,omitempty"`
+		Status  string `json:"status"`
+		Error   string `json:"error,omitempty"`
+		Hint    string `json:"hint,omitempty"`
 	}
 	results := make([]batchItemResult, len(reqs))
 	for i := range reqs {
 		if errs[i] != nil {
 			results[i] = batchItemResult{Index: i, Status: "error", Error: errs[i].Error()}
 		} else {
-			results[i] = batchItemResult{Index: i, ID: responses[i].ID, Status: "ok"}
+			results[i] = batchItemResult{Index: i, ID: responses[i].ID, Concept: reqs[i].Concept, Status: "ok"}
 		}
 		if malformedCounts[i] > 0 {
 			results[i].Hint = fmt.Sprintf("%d entity item(s) were malformed (expected {\"name\":\"...\",\"type\":\"...\"} objects) and were skipped.", malformedCounts[i])
@@ -1167,6 +1168,25 @@ func relTypeFromString(rel string) uint16 {
 		return uint16(v)
 	}
 	return uint16(storage.RelRelatesTo) // default
+}
+
+// relTypeReverseMap is the inverse of relTypeMap, built once at package init.
+// Used by relTypeToString for O(1) deterministic lookup.
+var relTypeReverseMap = func() map[storage.RelType]string {
+	m := make(map[storage.RelType]string, len(relTypeMap))
+	for s, v := range relTypeMap {
+		m[v] = s
+	}
+	return m
+}()
+
+// relTypeToString converts a storage.RelType to its canonical string name.
+// Returns "" for unknown or zero-value types (e.g. synthetic entity-hop edges).
+func relTypeToString(r storage.RelType) string {
+	if s, ok := relTypeReverseMap[r]; ok {
+		return s
+	}
+	return ""
 }
 
 func (s *MCPServer) handleSimilarEntities(ctx context.Context, w http.ResponseWriter, id json.RawMessage, vault string, args map[string]any) {

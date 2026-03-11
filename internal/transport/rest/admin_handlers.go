@@ -101,8 +101,11 @@ func (s *Server) handleCreateAPIKey(authStore *auth.Store) http.HandlerFunc {
 			s.sendError(r, w, http.StatusBadRequest, ErrInvalidEngram, "label too long")
 			return
 		}
-		if req.Mode != "" && req.Mode != "full" && req.Mode != "observe" {
-			s.sendError(r, w, http.StatusBadRequest, ErrInvalidEngram, "mode must be 'full' or 'observe'")
+		if req.Mode == "" {
+			req.Mode = auth.ModeFull // default to full access when mode is not specified
+		}
+		if req.Mode != auth.ModeFull && req.Mode != auth.ModeObserve && req.Mode != auth.ModeWrite {
+			s.sendError(r, w, http.StatusBadRequest, ErrInvalidEngram, "mode must be 'full', 'observe', or 'write'")
 			return
 		}
 		var expiresAt *time.Time
@@ -119,6 +122,7 @@ func (s *Server) handleCreateAPIKey(authStore *auth.Store) http.HandlerFunc {
 			s.sendError(r, w, http.StatusBadRequest, ErrInvalidEngram, err.Error())
 			return
 		}
+		key.StorageHash = nil // never leak the storage hash to API consumers
 		s.sendJSON(w, http.StatusCreated, map[string]interface{}{
 			"token": token, // shown once
 			"key":   key,
@@ -185,6 +189,9 @@ func (s *Server) handleListAPIKeys(authStore *auth.Store) http.HandlerFunc {
 			s.sendError(r, w, http.StatusInternalServerError, ErrStorageError, "failed to list API keys")
 			return
 		}
+		for i := range keys {
+			keys[i].StorageHash = nil // never leak the storage hash to API consumers
+		}
 		s.sendJSON(w, http.StatusOK, map[string]interface{}{"keys": keys})
 	}
 }
@@ -201,7 +208,11 @@ func (s *Server) handleRevokeAPIKey(authStore *auth.Store) http.HandlerFunc {
 			return
 		}
 		if err := authStore.RevokeAPIKey(vault, id); err != nil {
-			s.sendError(r, w, http.StatusNotFound, ErrEngramNotFound, err.Error())
+			if errors.Is(err, auth.ErrKeyNotFound) {
+				s.sendError(r, w, http.StatusNotFound, ErrEngramNotFound, err.Error())
+				return
+			}
+			s.sendError(r, w, http.StatusInternalServerError, ErrStorageError, err.Error())
 			return
 		}
 		s.sendJSON(w, http.StatusOK, map[string]interface{}{"revoked": id})

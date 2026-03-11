@@ -65,6 +65,22 @@ func TestCreateAPIKey(t *testing.T) {
 	}
 }
 
+// TestCreateAPIKey_WriteModeAccepted tests that "write" mode is accepted.
+func TestCreateAPIKey_WriteModeAccepted(t *testing.T) {
+	store := newTestAuthStore(t)
+	srv := newTestServer(t, store)
+
+	body, _ := json.Marshal(map[string]string{"vault": "default", "label": "bot", "mode": "write"})
+	req := httptest.NewRequest("POST", "/api/admin/keys", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("expected 201 for write mode, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // TestCreateAPIKeyInvalidMode tests that an invalid mode is rejected
 func TestCreateAPIKeyInvalidMode(t *testing.T) {
 	store := newTestAuthStore(t)
@@ -82,6 +98,33 @@ func TestCreateAPIKeyInvalidMode(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for invalid mode, got %d", w.Code)
+	}
+}
+
+// TestCreateAPIKey_DefaultsToFullMode tests that omitting mode defaults to "full".
+func TestCreateAPIKey_DefaultsToFullMode(t *testing.T) {
+	store := newTestAuthStore(t)
+	srv := newTestServer(t, store)
+
+	body, _ := json.Marshal(map[string]string{"vault": "default", "label": "default-mode-key"})
+	req := httptest.NewRequest("POST", "/api/admin/keys", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 when mode is omitted, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Key struct {
+			Mode string `json:"mode"`
+		} `json:"key"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Key.Mode != "full" {
+		t.Errorf("expected default mode 'full', got %q", resp.Key.Mode)
 	}
 }
 

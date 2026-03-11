@@ -2343,3 +2343,52 @@ func TestHandleReplayEnrichment_WithStages(t *testing.T) {
 		t.Error("response missing 'processed' field")
 	}
 }
+
+// ── Issue #172: concept in muninn_remember / muninn_remember_batch response ──
+
+// TestHandleRemember_ConceptInResponse verifies that the concept sent in a
+// muninn_remember request is echoed back in the response.
+// Regression test for issue #172 (concept always empty in response).
+func TestHandleRemember_ConceptInResponse(t *testing.T) {
+	srv := newTestServer()
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_remember","arguments":{"vault":"default","content":"test content","concept":"my-concept"}}}`
+	w := postRPC(t, srv, body)
+	resp := decodeResp(t, w.Body.String())
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+	content := extractInnerJSON(t, resp)
+	concept, ok := content["concept"].(string)
+	if !ok || concept != "my-concept" {
+		t.Errorf("expected concept='my-concept', got %v", content["concept"])
+	}
+}
+
+// TestHandleRememberBatch_ConceptInResponse verifies that each batch item's
+// concept is echoed back in the response.
+// Regression test for issue #172 (concept always empty in response).
+func TestHandleRememberBatch_ConceptInResponse(t *testing.T) {
+	srv := newTestServer()
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_remember_batch","arguments":{"vault":"default","memories":[{"content":"memory one","concept":"concept-a"},{"content":"memory two","concept":"concept-b"}]}}}`
+	w := postRPC(t, srv, body)
+	resp := decodeResp(t, w.Body.String())
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+	inner := extractInnerJSON(t, resp)
+	results, ok := inner["results"].([]any)
+	if !ok || len(results) != 2 {
+		t.Fatalf("expected 2 results, got %v", inner["results"])
+	}
+	wantConcepts := []string{"concept-a", "concept-b"}
+	for i, r := range results {
+		item, ok := r.(map[string]any)
+		if !ok {
+			t.Fatalf("results[%d] is not an object", i)
+		}
+		got, _ := item["concept"].(string)
+		if got != wantConcepts[i] {
+			t.Errorf("results[%d].concept = %q, want %q", i, got, wantConcepts[i])
+		}
+	}
+}

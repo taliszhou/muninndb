@@ -598,8 +598,14 @@ func TestClusterCoordinator_QuorumLoss_PreemptiveDemotion(t *testing.T) {
 	// This call should trigger demotion
 	coord.checkQuorumHealth()
 
-	// Give the async handleDemotion goroutine a moment to complete
-	time.Sleep(50 * time.Millisecond)
+	// Poll until the async handleDemotion goroutine completes demotion.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if !coord.IsLeader() {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
 
 	if coord.IsLeader() {
 		t.Error("expected demotion after sustained quorum loss")
@@ -1245,4 +1251,183 @@ func TestClusterCoordinator_HandleHandoff_PromotesTarget(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for HANDOFF_ACK")
 	}
+}
+
+// TestBug176_CrashRecoveryPathClearsBreadcrumb is a regression test for GitHub issue #176
+// (crash-recovery path). When a node recovered from a crash mid-handoff, it promoted itself
+// correctly but never cleared the PersistRole("cortex") breadcrumb. Every subsequent clean
+// restart incorrectly re-entered the crash-recovery path rather than going through a normal
+// election.
+func TestBug176_CrashRecoveryPathClearsBreadcrumb(t *testing.T) {
+	coord, _ := newTestCoordinator(t, "primary")
+
+	// Pre-set state: simulates a previous crash during HandleHandoff — PersistRole("cortex")
+	// was written and epoch was advanced, but in-memory promotion never completed.
+	if err := coord.epochStore.PersistRole("cortex"); err != nil {
+		t.Fatalf("PersistRole: %v", err)
+	}
+	coord.epochStore.ForceSet(1)
+
+	// Run the crash-recovery path via runAsCortex; cancel context immediately after
+	// the recovery finishes (it blocks on <-ctx.Done() after promoting).
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- coord.runAsCortex(ctx)
+	}()
+
+	// Wait for crash-recovery to promote (Role transitions to Primary), then unblock.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if coord.Role() == RolePrimary {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runAsCortex did not return after context cancel")
+	}
+
+	// The breadcrumb must be cleared so the next clean restart uses a normal election.
+	role, err := coord.epochStore.LoadRole()
+	if err != nil {
+		t.Fatalf("LoadRole: %v", err)
+	}
+	if role != "" {
+		t.Errorf("LoadRole() = %q after crash-recovery, want \"\" (regression: issue #176)", role)
+	}
+	// The coordinator must be in Primary role after crash-recovery.
+	if coord.Role() != RolePrimary {
+		t.Errorf("Role() = %v after crash-recovery, want RolePrimary", coord.Role())
+	}
+}
+
+// TestBug176_HandleHandoffClearsBreadcrumb is a regression test for GitHub issue #176
+// (HandleHandoff path). After a successful handoff promotion, the PersistRole("cortex")
+// breadcrumb must be cleared once the ACK is delivered to the old Cortex.
+func TestBug176_HandleHandoffClearsBreadcrumb(t *testing.T) {
+	coord, _ := newTestCoordinator(t, "replica")
+	coord.epochStore.ForceSet(5)
+
+	// Wire a pipe so HandleHandoff can send the HANDOFF_ACK.
+	fromID := "old-cortex"
+	serverSide, clientSide := net.Pipe()
+	t.Cleanup(func() { serverSide.Close(); clientSide.Close() })
+	fromPeer := &PeerConn{nodeID: fromID, conn: serverSide}
+	coord.mgr.mu.Lock()
+	coord.mgr.peers[fromID] = fromPeer
+	coord.mgr.mu.Unlock()
+
+	// Drain frames from the client side (CortexClaim broadcast + HANDOFF_ACK).
+	go func() {
+		for {
+			if _, err := mbp.ReadFrame(clientSide); err != nil {
+				return
+			}
+		}
+	}()
+
+	msg := mbp.HandoffMessage{TargetID: coord.cfg.NodeID, Epoch: 5, CortexSeq: 100}
+	payload, _ := msgpack.Marshal(msg)
+
+	if err := coord.HandleHandoff(fromID, payload); err != nil {
+		t.Fatalf("HandleHandoff: %v", err)
+	}
+
+	// After a successful HandleHandoff (ACK sent), the breadcrumb must be cleared.
+	role, err := coord.epochStore.LoadRole()
+	if err != nil {
+		t.Fatalf("LoadRole: %v", err)
+	}
+	if role != "" {
+		t.Errorf("LoadRole() = %q after HandleHandoff, want \"\" (regression: issue #176)", role)
+	}
+}
+
+// TestMSP_SetMissedThreshold verifies that SetMissedThreshold hot-reloads the SDOWN beat
+// count without restarting the MSP.
+func TestMSP_SetMissedThreshold(t *testing.T) {
+	mgr := NewConnManager("node1")
+	msp := NewMSP("node1", "127.0.0.1:9000", mgr)
+
+	// Atomic starts at zero before Run(); SetMissedThreshold can be called before Run().
+	msp.SetMissedThreshold(3)
+	if got := int(msp.missedThreshold.Load()); got != 3 {
+		t.Fatalf("after SetMissedThreshold(3), missedThreshold = %d, want 3", got)
+	}
+
+	// Hot-reload to 10.
+	msp.SetMissedThreshold(10)
+	if got := int(msp.missedThreshold.Load()); got != 10 {
+		t.Errorf("after SetMissedThreshold(10), missedThreshold = %d, want 10", got)
+	}
+
+	// Run() also sets the threshold from its parameter on startup.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = msp.Run(ctx, 100*time.Millisecond, 5)
+	}()
+	// Poll until Run() has stored the threshold.
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if int(msp.missedThreshold.Load()) == 5 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if got := int(msp.missedThreshold.Load()); got != 5 {
+		t.Errorf("after Run(threshold=5), missedThreshold = %d, want 5", got)
+	}
+}
+
+// TestCCSProbe_SetInterval verifies that SetInterval hot-reloads the CCS probe interval.
+func TestCCSProbe_SetInterval(t *testing.T) {
+	probe := NewCCSProbe(nil, nil)
+
+	// Default interval is 30s.
+	if got := int(probe.probeIntervalS.Load()); got != defaultCCSIntervalS {
+		t.Fatalf("default probeIntervalS = %d, want %d", got, defaultCCSIntervalS)
+	}
+
+	// Hot-reload to 60s.
+	probe.SetInterval(60 * time.Second)
+	if got := int(probe.probeIntervalS.Load()); got != 60 {
+		t.Errorf("after SetInterval(60s), probeIntervalS = %d, want 60", got)
+	}
+
+	// Minimum clamped to 1.
+	probe.SetInterval(0)
+	if got := int(probe.probeIntervalS.Load()); got != 1 {
+		t.Errorf("after SetInterval(0), probeIntervalS = %d, want 1 (clamped)", got)
+	}
+}
+
+// TestCoordinator_SetReconcileOnHeal verifies that SetReconcileOnHeal toggles the flag
+// and that the SDOWN recovery path respects it.
+func TestCoordinator_SetReconcileOnHeal(t *testing.T) {
+	coord, _ := newTestCoordinator(t, "primary")
+
+	// Default: enabled.
+	if got := coord.reconcileOnHeal.Load(); got != 1 {
+		t.Fatalf("default reconcileOnHeal = %d, want 1", got)
+	}
+
+	// Disable.
+	coord.SetReconcileOnHeal(false)
+	if got := coord.reconcileOnHeal.Load(); got != 0 {
+		t.Errorf("after SetReconcileOnHeal(false), reconcileOnHeal = %d, want 0", got)
+	}
+
+	// Re-enable.
+	coord.SetReconcileOnHeal(true)
+	if got := coord.reconcileOnHeal.Load(); got != 1 {
+		t.Errorf("after SetReconcileOnHeal(true), reconcileOnHeal = %d, want 1", got)
+	}
+
 }

@@ -1,6 +1,7 @@
 package auth_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,97 @@ import (
 	"github.com/cockroachdb/pebble/vfs"
 	"github.com/scrypster/muninndb/internal/auth"
 )
+
+func makeSessionToken(t *testing.T, secret []byte) string {
+	t.Helper()
+	token, err := auth.NewSessionToken("admin", secret)
+	if err != nil {
+		t.Fatalf("makeSessionToken: %v", err)
+	}
+	return token
+}
+
+func TestWriteOnlyFromContext(t *testing.T) {
+	tests := []struct {
+		mode string
+		want bool
+	}{
+		{"write", true},
+		{"full", false},
+		{"observe", false},
+		{"", false},
+	}
+	for _, tc := range tests {
+		ctx := context.WithValue(context.Background(), auth.ContextMode, tc.mode)
+		if got := auth.WriteOnlyFromContext(ctx); got != tc.want {
+			t.Errorf("mode=%q: WriteOnlyFromContext=%v, want %v", tc.mode, got, tc.want)
+		}
+	}
+}
+
+func TestWriteOnlyGuard_Blocks(t *testing.T) {
+	reached := false
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { reached = true })
+	handler := auth.WriteOnlyGuard(inner)
+
+	req := httptest.NewRequest("GET", "/", nil)
+	ctx := context.WithValue(req.Context(), auth.ContextMode, "write")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req.WithContext(ctx))
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403, got %d", w.Code)
+	}
+	if reached {
+		t.Error("inner handler should not be called for write-only mode")
+	}
+}
+
+func TestWriteOnlyGuard_PassesThrough(t *testing.T) {
+	for _, mode := range []string{"full", "observe", ""} {
+		mode := mode
+		reached := false
+		inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { reached = true })
+		handler := auth.WriteOnlyGuard(inner)
+
+		req := httptest.NewRequest("GET", "/", nil)
+		if mode != "" {
+			ctx := context.WithValue(req.Context(), auth.ContextMode, mode)
+			req = req.WithContext(ctx)
+		}
+		handler.ServeHTTP(httptest.NewRecorder(), req)
+		if !reached {
+			t.Errorf("mode=%q: inner handler should be called", mode)
+		}
+	}
+}
+
+// Regression: after "write"→"full" change, admin session must still be able to read.
+func TestVaultAuthWithAdminBypass_SetsFullMode(t *testing.T) {
+	store := newTestStore(t)
+	secret := []byte("test-secret")
+
+	called := false
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		mode, _ := r.Context().Value(auth.ContextMode).(string)
+		if mode != "full" {
+			t.Errorf("admin session mode = %q, want %q", mode, "full")
+		}
+		if auth.WriteOnlyFromContext(r.Context()) {
+			t.Error("WriteOnlyFromContext must return false for admin session")
+		}
+	})
+
+	handler := store.VaultAuthWithAdminBypass(secret, inner)
+	req := httptest.NewRequest("GET", "/?vault=default", nil)
+	token := makeSessionToken(t, secret)
+	req.AddCookie(&http.Cookie{Name: "muninn_session", Value: token})
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+	if !called {
+		t.Error("inner handler was not called")
+	}
+}
 
 func newTestStore(t *testing.T) *auth.Store {
 	t.Helper()

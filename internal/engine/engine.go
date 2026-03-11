@@ -1624,6 +1624,11 @@ func (e *Engine) activateCore(ctx context.Context, req *mbp.ActivateRequest, str
 	// top-N result receives a small boost. This surfaces entity-linked engrams
 	// that have no direct association edge to the query-matching engrams.
 	result.Activations = e.applyEntityBoost(ctx, wsPrefix, result.Activations)
+	// Re-apply MaxResults: entity boost may have appended engrams beyond the limit.
+	// applyEntityBoost re-sorts by score descending, so truncation preserves top-K.
+	if actReq.MaxResults > 0 && len(result.Activations) > actReq.MaxResults {
+		result.Activations = result.Activations[:actReq.MaxResults]
+	}
 
 	// Convert result.Activations to []mbp.ActivationItem
 	items := make([]mbp.ActivationItem, len(result.Activations))

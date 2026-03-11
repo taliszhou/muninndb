@@ -24,6 +24,12 @@ const maxBatchSize = 1000
 // returns persistent errors on CountWithoutFlag / ScanWithoutFlag.
 const maxBackoff = 5 * time.Minute
 
+// maxIdleInterval is the upper bound for poll back-off when CountWithoutFlag
+// reports pending items but the scan produces no actual work (phantom count).
+// The processor resets to pollInterval as soon as real work is done or Notify()
+// is called.
+const maxIdleInterval = 3 * time.Minute
+
 // RetroactiveProcessor processes engrams asynchronously with a registered plugin.
 // It scans for engrams missing a digest flag and calls the plugin to process them.
 // The processor runs continuously: it does an initial pass at startup, then polls
@@ -118,6 +124,7 @@ func (rp *RetroactiveProcessor) run(ctx context.Context) {
 	defer ticker.Stop()
 
 	var consecutiveErrors int
+	var consecutiveIdle int
 
 	// Initial pass immediately on start.
 	if rp.processBatch(ctx) {
@@ -134,21 +141,55 @@ func (rp *RetroactiveProcessor) run(ctx context.Context) {
 			rp.statsMu.Unlock()
 			return
 		case <-rp.notifyCh:
-			if rp.processBatch(ctx) {
+			// Explicit wakeup (new engram written) — always run immediately.
+			if rp.processBatchIdle(ctx, &consecutiveIdle) {
 				consecutiveErrors = 0
 			} else {
 				consecutiveErrors++
 				rp.backoff(ctx, consecutiveErrors)
 			}
+			// Reset to fast polling on explicit notify.
+			if consecutiveIdle == 0 {
+				ticker.Reset(pollInterval)
+			}
 		case <-ticker.C:
+			prevProcessed := rp.Stats().Processed
 			if rp.processBatch(ctx) {
 				consecutiveErrors = 0
+				if rp.Stats().Processed == prevProcessed {
+					// Ran successfully but did no actual work — back off.
+					consecutiveIdle++
+					newInterval := pollInterval * time.Duration(1<<min(consecutiveIdle, 6))
+					if newInterval > maxIdleInterval {
+						newInterval = maxIdleInterval
+					}
+					ticker.Reset(newInterval)
+				} else {
+					// Real work done — reset to fast polling.
+					if consecutiveIdle > 0 {
+						consecutiveIdle = 0
+						ticker.Reset(pollInterval)
+					}
+				}
 			} else {
 				consecutiveErrors++
 				rp.backoff(ctx, consecutiveErrors)
 			}
 		}
 	}
+}
+
+// processBatchIdle wraps processBatch and updates the idle counter.
+// Used by the Notify path where we always want to run but still track idle state.
+func (rp *RetroactiveProcessor) processBatchIdle(ctx context.Context, consecutiveIdle *int) bool {
+	prev := rp.Stats().Processed
+	ok := rp.processBatch(ctx)
+	if ok && rp.Stats().Processed > prev {
+		*consecutiveIdle = 0
+	} else if ok {
+		(*consecutiveIdle)++
+	}
+	return ok
 }
 
 // backoff sleeps for an exponentially increasing duration (capped at maxBackoff)
@@ -192,7 +233,12 @@ func (rp *RetroactiveProcessor) processBatch(ctx context.Context) bool {
 		return true
 	}
 
-	slog.Info("retroactive processor: starting", "plugin", rp.plugin.Name(), "total", total)
+	// Snapshot cumulative processed count so we can detect per-pass work.
+	rp.statsMu.RLock()
+	passStart := rp.stats.Processed
+	rp.statsMu.RUnlock()
+
+	slog.Debug("retroactive processor: starting", "plugin", rp.plugin.Name(), "total", total)
 
 	rp.statsMu.Lock()
 	rp.stats.Total += total
@@ -342,6 +388,24 @@ func (rp *RetroactiveProcessor) processBatch(ctx context.Context) bool {
 
 		// Non-embed (enrich) path: one-at-a-time as before.
 		if err := rp.processEngram(ctx, eng); err != nil {
+			if errors.Is(err, ErrNothingToEnrich) {
+				// Nothing to enrich is not a failure — mark the engram as
+				// enrichment-complete so it is not retried on the next scan.
+				slog.Debug("retroactive processor: nothing to enrich, marking complete",
+					"plugin", rp.plugin.Name(),
+					"engram_id", eng.ID.String())
+				if flagErr := rp.store.SetDigestFlag(ctx, eng.ID, rp.flagBit); flagErr != nil {
+					slog.Warn("retroactive processor: failed to set digest flag after nothing-to-enrich",
+						"plugin", rp.plugin.Name(),
+						"engram_id", eng.ID.String(),
+						"error", flagErr)
+				}
+				rp.statsMu.Lock()
+				rp.stats.Processed++
+				rp.statsMu.Unlock()
+				batchCount++
+				continue
+			}
 			slog.Warn("retroactive processor: failed to process engram",
 				"plugin", rp.plugin.Name(),
 				"engram_id", eng.ID.String(),
@@ -401,12 +465,22 @@ func (rp *RetroactiveProcessor) processBatch(ctx context.Context) bool {
 
 	rp.statsMu.Lock()
 	rp.stats.Status = "idle"
+	passProcessed := rp.stats.Processed - passStart
+	totalProcessed := rp.stats.Processed
+	totalErrors := rp.stats.Errors
 	rp.statsMu.Unlock()
 
-	slog.Info("retroactive processor: complete",
-		"plugin", rp.plugin.Name(),
-		"processed", rp.stats.Processed,
-		"errors", rp.stats.Errors)
+	if passProcessed > 0 {
+		slog.Info("retroactive processor: complete",
+			"plugin", rp.plugin.Name(),
+			"pass_processed", passProcessed,
+			"total_processed", totalProcessed,
+			"errors", totalErrors)
+	} else {
+		slog.Debug("retroactive processor: idle (phantom count)",
+			"plugin", rp.plugin.Name(),
+			"reported_total", total)
+	}
 
 	return true
 }

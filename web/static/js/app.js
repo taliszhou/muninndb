@@ -382,7 +382,7 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
-    _onViewEnter(view) {
+    async _onViewEnter(view) {
       // Stop observability polling when leaving the tab
       if (this._obsInterval) {
         clearInterval(this._obsInterval);
@@ -423,6 +423,7 @@ document.addEventListener('alpine:init', () => {
         } else if (this.settingsTab === 'plugins') {
           this.loadPlugins();
           this.loadEmbedStatus();
+          await this.loadSavedPluginConfig();  // must resolve before probeOllama reads model state
           this.probeOllama();
         } else if (this.settingsTab === 'keys') {
           this.loadApiKeys();
@@ -1595,14 +1596,19 @@ document.addEventListener('alpine:init', () => {
     async loadSavedPluginConfig() {
         try {
             const data = await this.apiCall('/api/admin/plugin-config');
-            const embedUrl = data.embed_url || '';
-            // Only populate the Base URL field when it's an HTTP/HTTPS URL.
-            // ollama:// and other scheme URLs encode a model name, not a base URL.
-            if (embedUrl.startsWith('http://') || embedUrl.startsWith('https://')) {
-                this.pluginCfg.embedUrl = embedUrl;
-            }
-        } catch (_) {
-            // Non-critical — leave embedUrl at default
+            const parsed = MuninnPluginCfg.parsePluginConfigResponse(data);
+            if (!parsed) return;
+            const c = this.pluginCfg;
+            c.embedProvider  = parsed.embedProvider;
+            if (parsed.embedOllamaModel  !== null) c.embedOllamaModel  = parsed.embedOllamaModel;
+            if (parsed.embedUrl          !== null) c.embedUrl          = parsed.embedUrl;
+            if (parsed.embedApiKey       !== null) c.embedApiKey       = parsed.embedApiKey;
+            c.enrichProvider = parsed.enrichProvider;
+            if (parsed.enrichOllamaModel !== null) c.enrichOllamaModel = parsed.enrichOllamaModel;
+            if (parsed.enrichModel       !== null) c.enrichModel       = parsed.enrichModel;
+            if (parsed.enrichApiKey      !== null) c.enrichApiKey      = parsed.enrichApiKey;
+        } catch (e) {
+            console.warn('loadSavedPluginConfig failed:', e);
         }
     },
     async loadWorkers() {
@@ -2129,6 +2135,23 @@ document.addEventListener('alpine:init', () => {
       navigator.clipboard.writeText(this.clusterToken.token).catch(() => {});
       this.clusterTokenCopied = true;
       setTimeout(() => { this.clusterTokenCopied = false; }, 2000);
+    },
+
+    async loadClusterSettings() {
+      try {
+        const resp = await fetch('/api/admin/cluster/settings', { credentials: 'same-origin' });
+        if (resp.ok) {
+          const data = await resp.json();
+          this.clusterSettings = {
+            heartbeat_ms: data.heartbeat_ms ?? this.clusterSettings.heartbeat_ms,
+            sdown_beats: data.sdown_beats ?? this.clusterSettings.sdown_beats,
+            ccs_interval_seconds: data.ccs_interval_seconds ?? this.clusterSettings.ccs_interval_seconds,
+            reconcile_on_heal: data.reconcile_on_heal ?? this.clusterSettings.reconcile_on_heal,
+          };
+        }
+      } catch (err) {
+        // Non-fatal — form shows defaults; user can still save.
+      }
     },
 
     async saveClusterSettings() {

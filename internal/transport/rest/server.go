@@ -167,33 +167,36 @@ func NewServer(addr string, engine EngineAPI, authStore *auth.Store, sessionSecr
 	// Authenticated vault routes — require Bearer API key.
 	mux.HandleFunc("POST /api/engrams/batch", s.withMiddleware(s.handleBatchCreate))
 	mux.HandleFunc("POST /api/engrams", s.withMiddleware(s.handleCreateEngram))
-	mux.HandleFunc("GET /api/engrams/{id}", s.withMiddleware(s.handleGetEngram))
+	mux.HandleFunc("GET /api/engrams/{id}", s.withMiddleware(auth.WriteOnlyGuard(s.handleGetEngram)))
 	mux.HandleFunc("DELETE /api/engrams/{id}", s.withMiddleware(s.handleDeleteEngram))
-	mux.HandleFunc("POST /api/activate", s.withMiddleware(s.handleActivate))
+	mux.HandleFunc("POST /api/activate", s.withMiddleware(auth.WriteOnlyGuard(s.handleActivate)))
 	mux.HandleFunc("POST /api/link", s.withMiddleware(s.handleLink))
-	mux.HandleFunc("GET /api/stats", s.withMiddleware(s.handleStats))
-	mux.HandleFunc("GET /api/engrams", s.withMiddleware(s.handleListEngrams))
-	mux.HandleFunc("GET /api/engrams/{id}/links", s.withMiddleware(s.handleGetEngramLinks))
-	mux.HandleFunc("POST /api/engrams/links/batch", s.withMiddleware(s.handleBatchGetEngramLinks))
-	mux.HandleFunc("GET /api/vaults", s.withMiddleware(s.handleListVaults))
+	mux.HandleFunc("GET /api/stats", s.withMiddleware(auth.WriteOnlyGuard(s.handleStats)))
+	mux.HandleFunc("GET /api/engrams", s.withMiddleware(auth.WriteOnlyGuard(s.handleListEngrams)))
+	mux.HandleFunc("GET /api/engrams/{id}/links", s.withMiddleware(auth.WriteOnlyGuard(s.handleGetEngramLinks)))
+	mux.HandleFunc("POST /api/engrams/links/batch", s.withMiddleware(auth.WriteOnlyGuard(s.handleBatchGetEngramLinks)))
+	mux.HandleFunc("GET /api/vaults", s.withMiddleware(auth.WriteOnlyGuard(s.handleListVaults)))
 	mux.HandleFunc("GET /api/vaults/stats", s.withAdminMiddleware(s.handleVaultStats()))
-	mux.HandleFunc("GET /api/session", s.withMiddleware(s.handleGetSession))
+	mux.HandleFunc("GET /api/session", s.withMiddleware(auth.WriteOnlyGuard(s.handleGetSession)))
 	// SSE subscribe — long-lived; bypasses write timeout via ResponseController.
-	mux.HandleFunc("GET /api/subscribe", s.withMiddleware(s.handleSubscribe))
+	mux.HandleFunc("GET /api/subscribe", s.withMiddleware(auth.WriteOnlyGuard(s.handleSubscribe)))
 
 	// Extended vault routes — operations that were previously MCP-only.
-	mux.HandleFunc("POST /api/engrams/{id}/evolve", s.withMiddleware(s.handleEvolve))
-	mux.HandleFunc("POST /api/consolidate", s.withMiddleware(s.handleConsolidateEngrams))
-	mux.HandleFunc("POST /api/decide", s.withMiddleware(s.handleDecide))
-	mux.HandleFunc("POST /api/engrams/{id}/restore", s.withMiddleware(s.handleRestore))
-	mux.HandleFunc("POST /api/traverse", s.withMiddleware(s.handleTraverse))
-	mux.HandleFunc("POST /api/explain", s.withMiddleware(s.handleExplain))
+	// These POST operations mutate existing engrams and return engram data in
+	// their response body — write-only keys must not be able to extract vault
+	// data via any response path.
+	mux.HandleFunc("POST /api/engrams/{id}/evolve", s.withMiddleware(auth.WriteOnlyGuard(s.handleEvolve)))
+	mux.HandleFunc("POST /api/consolidate", s.withMiddleware(auth.WriteOnlyGuard(s.handleConsolidateEngrams)))
+	mux.HandleFunc("POST /api/decide", s.withMiddleware(auth.WriteOnlyGuard(s.handleDecide)))
+	mux.HandleFunc("POST /api/engrams/{id}/restore", s.withMiddleware(auth.WriteOnlyGuard(s.handleRestore)))
+	mux.HandleFunc("POST /api/traverse", s.withMiddleware(auth.WriteOnlyGuard(s.handleTraverse)))
+	mux.HandleFunc("POST /api/explain", s.withMiddleware(auth.WriteOnlyGuard(s.handleExplain)))
 	mux.HandleFunc("PUT /api/engrams/{id}/state", s.withMiddleware(s.handleSetState))
 	mux.HandleFunc("PUT /api/engrams/{id}/tags", s.withMiddleware(s.handleUpdateTags))
-	mux.HandleFunc("GET /api/deleted", s.withMiddleware(s.handleListDeleted))
-	mux.HandleFunc("POST /api/engrams/{id}/retry-enrich", s.withMiddleware(s.handleRetryEnrich))
-	mux.HandleFunc("GET /api/contradictions", s.withMiddleware(s.handleContradictions))
-	mux.HandleFunc("GET /api/guide", s.withMiddleware(s.handleGuide))
+	mux.HandleFunc("GET /api/deleted", s.withMiddleware(auth.WriteOnlyGuard(s.handleListDeleted)))
+	mux.HandleFunc("POST /api/engrams/{id}/retry-enrich", s.withMiddleware(auth.WriteOnlyGuard(s.handleRetryEnrich)))
+	mux.HandleFunc("GET /api/contradictions", s.withMiddleware(auth.WriteOnlyGuard(s.handleContradictions)))
+	mux.HandleFunc("GET /api/guide", s.withMiddleware(auth.WriteOnlyGuard(s.handleGuide)))
 
 	// Admin routes — require valid admin session cookie, return JSON 401 on failure.
 	mux.HandleFunc("POST /api/admin/keys", s.withAdminMiddleware(s.handleCreateAPIKey(authStore)))
@@ -233,6 +236,7 @@ func NewServer(addr string, engine EngineAPI, authStore *auth.Store, sessionSecr
 	mux.HandleFunc("DELETE /api/admin/cluster/nodes/{id}", s.withAdminMiddleware(s.handleAdminClusterRemoveNode))
 	mux.HandleFunc("POST /api/admin/cluster/failover", s.withAdminMiddleware(s.handleAdminClusterFailover))
 	mux.HandleFunc("POST /api/admin/cluster/tls/rotate", s.withAdminMiddleware(s.handleAdminClusterRotateTLS))
+	mux.HandleFunc("GET /api/admin/cluster/settings", s.withAdminMiddleware(s.handleAdminClusterGetSettings))
 	mux.HandleFunc("PUT /api/admin/cluster/settings", s.withAdminMiddleware(s.handleAdminClusterSettings))
 	mux.HandleFunc("POST /api/admin/cluster/nodes/test", s.withAdminMiddleware(s.handleAdminClusterTestNode))
 	mux.HandleFunc("GET /api/admin/cluster/events", s.withAdminMiddleware(s.handleAdminClusterEvents))
@@ -361,6 +365,15 @@ func (s *Server) applyAndPersistSettings(req clusterSettingsRequest) error {
 	}
 	if req.HeartbeatMS != nil {
 		cfg.HeartbeatMS = *req.HeartbeatMS
+	}
+	if req.SDOWNBeats != nil {
+		cfg.SDOWNBeats = *req.SDOWNBeats
+	}
+	if req.CCSIntervalS != nil {
+		cfg.CCSIntervalS = *req.CCSIntervalS
+	}
+	if req.ReconcileHeal != nil {
+		cfg.ReconcileHeal = *req.ReconcileHeal
 	}
 	return config.SaveClusterConfig(s.dataDir, cfg)
 }

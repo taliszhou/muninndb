@@ -276,3 +276,31 @@ func TestMCPEngineAdapterTraverseExplicitMaxHops(t *testing.T) {
 		t.Errorf("expected maxNodes=100, got %d", maxNodes)
 	}
 }
+
+// TestRelTypeToString_SupportsRoundTrip verifies that relTypeToString is the
+// correct inverse of relTypeFromString for all known relation types.
+// Regression guard for issue #173 (rel_type always empty in muninn_traverse).
+func TestRelTypeToString_AllKnownTypes(t *testing.T) {
+	// All canonical string names that appear in relTypeMap.
+	knownTypes := []string{
+		"supports", "contradicts", "depends_on", "supersedes", "relates_to",
+		"is_part_of", "causes", "preceded_by", "followed_by", "created_by_person",
+		"belongs_to_project", "references", "implements", "blocks", "resolves", "refines",
+	}
+	for _, name := range knownTypes {
+		code := storage.RelType(relTypeFromString(name))
+		got := relTypeToString(code)
+		if got != name {
+			t.Errorf("round-trip failed for %q: relTypeToString(%d) = %q", name, code, got)
+		}
+	}
+}
+
+// TestRelTypeToString_ZeroValueEmpty verifies that RelType(0) — used by
+// synthetic entity-hop edges — returns an empty string (not a panic or "relates_to").
+func TestRelTypeToString_ZeroValueEmpty(t *testing.T) {
+	got := relTypeToString(storage.RelType(0))
+	if got != "" {
+		t.Errorf("relTypeToString(0) = %q, want empty string", got)
+	}
+}

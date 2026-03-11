@@ -137,9 +137,10 @@ func (a *mcpEngineAdapter) Traverse(ctx context.Context, vault string, req *Trav
 	}
 	for _, e := range edges {
 		result.Edges = append(result.Edges, TraversalEdge{
-			FromID: e.From.String(),
-			ToID:   e.To.String(),
-			Weight: e.Weight,
+			FromID:  e.From.String(),
+			ToID:    e.To.String(),
+			RelType: relTypeToString(e.RelType),
+			Weight:  e.Weight,
 		})
 	}
 	return result, nil

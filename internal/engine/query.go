@@ -19,9 +19,10 @@ type TraversalNode struct {
 
 // TraversalEdge is an association edge returned during graph traversal.
 type TraversalEdge struct {
-	From   storage.ULID
-	To     storage.ULID
-	Weight float32
+	From    storage.ULID
+	To      storage.ULID
+	RelType storage.RelType // zero for synthetic entity-hop edges
+	Weight  float32
 }
 
 // ExplainData is the engine-level score explanation for a specific engram + query.
@@ -155,7 +156,7 @@ func (e *Engine) Traverse(ctx context.Context, vault, startID string, maxHops, m
 				}
 			}
 			for _, assoc := range assocMap[src] {
-				edges = append(edges, TraversalEdge{From: src, To: assoc.TargetID, Weight: assoc.Weight})
+				edges = append(edges, TraversalEdge{From: src, To: assoc.TargetID, RelType: assoc.RelType, Weight: assoc.Weight})
 				if _, seen := visited[assoc.TargetID]; !seen {
 					visited[assoc.TargetID] = struct{}{}
 					hopMap[assoc.TargetID] = hop + 1
