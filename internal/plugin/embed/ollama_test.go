@@ -349,3 +349,7 @@ func TestOllamaProvider_EmbedBatch_NonEmptyResult(t *testing.T) {
 		// Just verify we got some data back
 	}
 }
+
+// compile-time assertion — OllamaProvider implements HardwareAwarePlugin after Task 2
+// (commented out until Task 2 is done; uncomment as part of Task 2 verification)
+// var _ plugin.HardwareAwarePlugin = (*OllamaProvider)(nil)
