@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/scrypster/muninndb/internal/config"
 	"github.com/scrypster/muninndb/internal/plugin"
+	"github.com/scrypster/muninndb/internal/plugin/llmstats"
 	"github.com/scrypster/muninndb/internal/storage"
 )
 
@@ -27,6 +29,7 @@ type EnrichmentPipeline struct {
 	prompts  *Prompts
 	limiter  *TokenBucketLimiter
 	cfg      *config.PluginConfig
+	stats    llmstats.LLMCallStats
 }
 
 // NewPipeline creates a new enrichment pipeline.
@@ -42,6 +45,41 @@ func NewPipeline(provider LLMProvider, limiter *TokenBucketLimiter) *EnrichmentP
 // SetConfig applies server-level enrichment configuration (per-stage flags, mode).
 func (p *EnrichmentPipeline) SetConfig(cfg *config.PluginConfig) {
 	p.cfg = cfg
+}
+
+// LLMStats returns a point-in-time snapshot of LLM call metrics.
+func (p *EnrichmentPipeline) LLMStats() llmstats.Snapshot {
+	return p.stats.Snapshot()
+}
+
+// verboseLogsFlag returns the LLMVerboseLogs config flag pointer, or nil if cfg is nil.
+func (p *EnrichmentPipeline) verboseLogsFlag() *bool {
+	if p.cfg == nil {
+		return nil
+	}
+	return p.cfg.LLMVerboseLogs
+}
+
+// recordComplete updates aggregate stats and emits a verbose log entry when enabled.
+func (p *EnrichmentPipeline) recordComplete(ctx context.Context, callType string, latMs int64, err error) {
+	p.stats.TotalCalls.Add(1)
+	p.stats.TotalLatencyMs.Add(latMs)
+	if err != nil {
+		p.stats.TotalErrors.Add(1)
+	}
+	if llmstats.VerboseEnabled(p.verboseLogsFlag()) {
+		attrs := []any{
+			"source", "llm",
+			"subsystem", "enrich",
+			"call_type", callType,
+			"provider", p.provider.Name(),
+			"latency_ms", latMs,
+		}
+		if err != nil {
+			attrs = append(attrs, "error", err.Error())
+		}
+		slog.InfoContext(ctx, "llm.complete", attrs...)
+	}
 }
 
 // stageEnabled returns whether a named stage is enabled given config and light-mode rules.
@@ -197,7 +235,9 @@ func (p *EnrichmentPipeline) extractEntities(ctx context.Context, eng *storage.E
 	}
 
 	userMsg := fmt.Sprintf("Concept: %s\n\nContent: %s", eng.Concept, eng.Content)
+	start := time.Now()
 	resp, err := p.provider.Complete(ctx, p.prompts.EntitiesSystem, userMsg)
+	p.recordComplete(ctx, "entities", time.Since(start).Milliseconds(), err)
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +263,9 @@ func (p *EnrichmentPipeline) extractRelationships(ctx context.Context, eng *stor
 
 	userMsg := fmt.Sprintf("Entities: %s\n\nConcept: %s\n\nContent: %s",
 		entitiesJSON, eng.Concept, eng.Content)
+	start := time.Now()
 	resp, err := p.provider.Complete(ctx, p.prompts.RelationshipsSystem, userMsg)
+	p.recordComplete(ctx, "relationships", time.Since(start).Milliseconds(), err)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +280,9 @@ func (p *EnrichmentPipeline) classify(ctx context.Context, eng *storage.Engram) 
 	}
 
 	userMsg := fmt.Sprintf("Concept: %s\n\nContent: %s", eng.Concept, eng.Content)
+	start := time.Now()
 	resp, err := p.provider.Complete(ctx, p.prompts.ClassifySystem, userMsg)
+	p.recordComplete(ctx, "classification", time.Since(start).Milliseconds(), err)
 	if err != nil {
 		return "", "", "", "", nil, err
 	}
@@ -253,7 +297,9 @@ func (p *EnrichmentPipeline) summarize(ctx context.Context, eng *storage.Engram)
 	}
 
 	userMsg := fmt.Sprintf("Concept: %s\n\nContent: %s", eng.Concept, eng.Content)
+	start := time.Now()
 	resp, err := p.provider.Complete(ctx, p.prompts.SummarizeSystem, userMsg)
+	p.recordComplete(ctx, "summary", time.Since(start).Milliseconds(), err)
 	if err != nil {
 		return "", nil, err
 	}

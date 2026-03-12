@@ -7,7 +7,19 @@ import (
 
 	"github.com/scrypster/muninndb/internal/cognitive"
 	"github.com/scrypster/muninndb/internal/metrics/latency"
+	"github.com/scrypster/muninndb/internal/plugin"
+	"github.com/scrypster/muninndb/internal/plugin/llmstats"
 )
+
+// LLMStats holds aggregate LLM call metrics for enrich and embed subsystems.
+type LLMStats struct {
+	EnrichCalls  int64   `json:"enrich_calls"`
+	EnrichErrors int64   `json:"enrich_errors"`
+	EnrichAvgMs  float64 `json:"enrich_avg_latency_ms"`
+	EmbedCalls   int64   `json:"embed_calls"`
+	EmbedErrors  int64   `json:"embed_errors"`
+	EmbedAvgMs   float64 `json:"embed_avg_latency_ms"`
+}
 
 // ObservabilitySnapshot is a full system snapshot for the observability endpoint.
 type ObservabilitySnapshot struct {
@@ -16,6 +28,7 @@ type ObservabilitySnapshot struct {
 	Processors []ProcessorStats             `json:"processors"`
 	Workers    WorkerStatsSnapshot           `json:"cognitive_workers"`
 	Vaults     map[string]VaultObservability `json:"vaults"`
+	LLM        *LLMStats                     `json:"llm,omitempty"`
 }
 
 // SystemStats holds Go runtime and process-level metrics.
@@ -210,11 +223,45 @@ func (e *Engine) Observability(ctx context.Context, version string, uptimeSecond
 		}
 	}
 
+	// 6. LLM stats — only populated when at least one LLM plugin is active.
+	var llmStats *LLMStats
+	if e.enrichPlugin != nil {
+		if p, ok := e.enrichPlugin.(llmstats.Provider); ok {
+			snap := p.LLMStats()
+			if llmStats == nil {
+				llmStats = &LLMStats{}
+			}
+			llmStats.EnrichCalls = snap.Calls
+			llmStats.EnrichErrors = snap.Errors
+			llmStats.EnrichAvgMs = snap.AvgLatMs
+		}
+	}
+	for _, rp := range e.retroProcessors {
+		if rp == nil {
+			continue
+		}
+		plug := rp.Plugin()
+		if plug == nil || plug.Tier() != plugin.TierEmbed {
+			continue
+		}
+		if p, ok := plug.(llmstats.Provider); ok {
+			snap := p.LLMStats()
+			if llmStats == nil {
+				llmStats = &LLMStats{}
+			}
+			llmStats.EmbedCalls = snap.Calls
+			llmStats.EmbedErrors = snap.Errors
+			llmStats.EmbedAvgMs = snap.AvgLatMs
+			break
+		}
+	}
+
 	return &ObservabilitySnapshot{
 		System:     sys,
 		Storage:    stor,
 		Processors: processors,
 		Workers:    workers,
 		Vaults:     vaults,
+		LLM:        llmStats,
 	}, nil
 }

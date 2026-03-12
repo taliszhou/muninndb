@@ -43,7 +43,7 @@ func (m *MockProvider) Close() error {
 
 func TestBatchEmbedder_SingleBatch(t *testing.T) {
 	mock := &MockProvider{maxBatchSize: 32}
-	embedder := NewBatchEmbedder(mock, nil)
+	embedder := NewBatchEmbedder(mock, nil, nil)
 
 	texts := []string{"hello", "world"}
 	result, err := embedder.Embed(context.Background(), texts)
@@ -63,7 +63,7 @@ func TestBatchEmbedder_SingleBatch(t *testing.T) {
 
 func TestBatchEmbedder_MultipleBatches(t *testing.T) {
 	mock := &MockProvider{maxBatchSize: 2}
-	embedder := NewBatchEmbedder(mock, nil)
+	embedder := NewBatchEmbedder(mock, nil, nil)
 
 	texts := []string{"a", "b", "c", "d", "e"}
 	result, err := embedder.Embed(context.Background(), texts)
@@ -85,7 +85,7 @@ func TestBatchEmbedder_MultipleBatches(t *testing.T) {
 
 func TestBatchEmbedder_ExactBatchSize(t *testing.T) {
 	mock := &MockProvider{maxBatchSize: 3}
-	embedder := NewBatchEmbedder(mock, nil)
+	embedder := NewBatchEmbedder(mock, nil, nil)
 
 	texts := []string{"a", "b", "c", "d", "e", "f"}
 	result, err := embedder.Embed(context.Background(), texts)
@@ -107,7 +107,7 @@ func TestBatchEmbedder_ExactBatchSize(t *testing.T) {
 
 func TestBatchEmbedder_SingleText(t *testing.T) {
 	mock := &MockProvider{maxBatchSize: 10}
-	embedder := NewBatchEmbedder(mock, nil)
+	embedder := NewBatchEmbedder(mock, nil, nil)
 
 	texts := []string{"single"}
 	result, err := embedder.Embed(context.Background(), texts)
@@ -127,7 +127,7 @@ func TestBatchEmbedder_SingleText(t *testing.T) {
 
 func TestBatchEmbedder_EmptyInput(t *testing.T) {
 	mock := &MockProvider{maxBatchSize: 32}
-	embedder := NewBatchEmbedder(mock, nil)
+	embedder := NewBatchEmbedder(mock, nil, nil)
 
 	texts := []string{}
 	result, err := embedder.Embed(context.Background(), texts)
@@ -146,7 +146,7 @@ func TestBatchEmbedder_EmptyInput(t *testing.T) {
 
 func TestBatchEmbedder_LargeBatch(t *testing.T) {
 	mock := &MockProvider{maxBatchSize: 10}
-	embedder := NewBatchEmbedder(mock, nil)
+	embedder := NewBatchEmbedder(mock, nil, nil)
 
 	// Create 25 texts
 	texts := make([]string, 25)
@@ -173,7 +173,7 @@ func TestBatchEmbedder_LargeBatch(t *testing.T) {
 
 func TestBatchEmbedder_ContextCancellation(t *testing.T) {
 	mock := &MockProvider{maxBatchSize: 2}
-	embedder := NewBatchEmbedder(mock, nil)
+	embedder := NewBatchEmbedder(mock, nil, nil)
 
 	texts := []string{"a", "b", "c", "d"}
 
@@ -198,7 +198,7 @@ func (e *emptyProvider) EmbedBatch(_ context.Context, _ []string) ([]float32, er
 
 func TestBatchEmbedder_ProviderReturnsEmpty(t *testing.T) {
 	mock := &emptyProvider{MockProvider: MockProvider{maxBatchSize: 32}}
-	embedder := NewBatchEmbedder(mock, nil)
+	embedder := NewBatchEmbedder(mock, nil, nil)
 
 	_, err := embedder.Embed(context.Background(), []string{"hello"})
 	if err == nil {
@@ -216,7 +216,7 @@ func (e *errorProvider) EmbedBatch(_ context.Context, _ []string) ([]float32, er
 
 func TestBatchEmbedder_ProviderError(t *testing.T) {
 	mock := &errorProvider{MockProvider: MockProvider{maxBatchSize: 32}}
-	embedder := NewBatchEmbedder(mock, nil)
+	embedder := NewBatchEmbedder(mock, nil, nil)
 
 	_, err := embedder.Embed(context.Background(), []string{"hello"})
 	if err == nil {
@@ -227,7 +227,7 @@ func TestBatchEmbedder_ProviderError(t *testing.T) {
 func TestBatchEmbedder_WithRateLimiter(t *testing.T) {
 	mock := &MockProvider{maxBatchSize: 2}
 	limiter := NewTokenBucketLimiter(1000.0, 1000.0)
-	embedder := NewBatchEmbedder(mock, limiter)
+	embedder := NewBatchEmbedder(mock, limiter, nil)
 
 	texts := []string{"a", "b", "c", "d"}
 	result, err := embedder.Embed(context.Background(), texts)
@@ -253,7 +253,7 @@ func TestBatchEmbedder_WithRateLimiter_ContextCancelled(t *testing.T) {
 	// Consume the only available token.
 	limiter.Wait(context.Background())
 
-	embedder := NewBatchEmbedder(mock, limiter)
+	embedder := NewBatchEmbedder(mock, limiter, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -266,7 +266,7 @@ func TestBatchEmbedder_WithRateLimiter_ContextCancelled(t *testing.T) {
 
 func TestBatchEmbedder_MockEmbedding(t *testing.T) {
 	mock := &MockProvider{maxBatchSize: 2}
-	embedder := NewBatchEmbedder(mock, nil)
+	embedder := NewBatchEmbedder(mock, nil, nil)
 
 	texts := []string{"hello", "world"}
 	result, err := embedder.Embed(context.Background(), texts)

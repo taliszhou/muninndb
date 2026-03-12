@@ -8,6 +8,7 @@ import (
 
 	"github.com/scrypster/muninndb/internal/config"
 	"github.com/scrypster/muninndb/internal/plugin"
+	"github.com/scrypster/muninndb/internal/plugin/llmstats"
 	"github.com/scrypster/muninndb/internal/storage"
 )
 
@@ -148,6 +149,17 @@ func (s *EnrichService) Enrich(ctx context.Context, eng *storage.Engram) (*plugi
 	}
 
 	return s.pipeline.Run(ctx, eng)
+}
+
+// LLMStats returns a point-in-time snapshot of LLM call metrics.
+func (s *EnrichService) LLMStats() llmstats.Snapshot {
+	s.mu.Lock()
+	pipeline := s.pipeline
+	s.mu.Unlock()
+	if pipeline == nil {
+		return llmstats.Snapshot{}
+	}
+	return pipeline.LLMStats()
 }
 
 // Close releases external connections.

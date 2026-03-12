@@ -93,6 +93,11 @@ func (rp *RetroactiveProcessor) Stats() RetroactiveStats {
 	return rp.stats
 }
 
+// Plugin returns the plugin associated with this processor.
+func (p *RetroactiveProcessor) Plugin() Plugin {
+	return p.plugin
+}
+
 // Mode returns "embed" when this processor handles embedding (DigestEmbed flag)
 // or "enrich" when it handles enrichment (DigestEnrich flag).
 func (rp *RetroactiveProcessor) Mode() string {

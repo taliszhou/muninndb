@@ -27,6 +27,10 @@ type PluginConfig struct {
 	EnrichClassification *bool  `json:"enrich_classification,omitempty"`
 	EnrichSummary        *bool  `json:"enrich_summary,omitempty"`
 	EnrichMode           string `json:"enrich_mode,omitempty"` // "full" (default) or "light"
+
+	// LLMVerboseLogs enables per-call LLM log entries in the Logs page.
+	// nil = false. Overridden by MUNINN_LLM_VERBOSE_LOGS=true env var.
+	LLMVerboseLogs *bool `json:"llm_verbose_logs,omitempty"`
 }
 
 // EnrichStageEnabled returns whether a given enrichment stage is enabled.

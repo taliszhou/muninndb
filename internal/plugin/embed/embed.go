@@ -7,7 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/scrypster/muninndb/internal/config"
 	"github.com/scrypster/muninndb/internal/plugin"
+	"github.com/scrypster/muninndb/internal/plugin/llmstats"
 )
 
 // Provider is the internal interface for provider HTTP clients.
@@ -40,15 +42,17 @@ type ProviderHTTPConfig struct {
 
 // EmbedService implements plugin.EmbedPlugin.
 type EmbedService struct {
-	provider Provider
-	cfg      plugin.PluginConfig
-	provCfg  *plugin.ProviderConfig
-	dim      int    // detected at Init time
-	name     string // "embed-ollama", "embed-openai", "embed-voyage"
-	batcher  *BatchEmbedder
-	limiter  *TokenBucketLimiter
-	mu       sync.Mutex
-	closed   bool
+	provider        Provider
+	cfg             plugin.PluginConfig
+	provCfg         *plugin.ProviderConfig
+	dim             int    // detected at Init time
+	name            string // "embed-ollama", "embed-openai", "embed-voyage"
+	batcher         *BatchEmbedder
+	limiter         *TokenBucketLimiter
+	stats           llmstats.LLMCallStats
+	verboseLogsFlag *bool
+	mu              sync.Mutex
+	closed          bool
 }
 
 // NewEmbedService creates an EmbedService from a parsed provider URL.
@@ -149,7 +153,8 @@ func (s *EmbedService) Init(ctx context.Context, cfg plugin.PluginConfig) error 
 	s.limiter = s.createRateLimiter(s.provCfg.Scheme, cfg.Options)
 
 	// Set up batch embedder
-	s.batcher = NewBatchEmbedder(s.provider, s.limiter)
+	s.batcher = NewBatchEmbedder(s.provider, s.limiter, &s.stats)
+	s.batcher.SetVerboseLogs(s.verboseLogsFlag)
 
 	return nil
 }
@@ -181,6 +186,33 @@ func (s *EmbedService) Dimension() int {
 // MaxBatchSize delegates to the underlying provider's optimal batch size.
 func (s *EmbedService) MaxBatchSize() int {
 	return s.provider.MaxBatchSize()
+}
+
+// LLMStats returns a point-in-time snapshot of LLM call metrics.
+func (s *EmbedService) LLMStats() llmstats.Snapshot {
+	return s.stats.Snapshot()
+}
+
+// SetVerboseLogs sets the verbose logs flag for per-call log entries.
+func (s *EmbedService) SetVerboseLogs(flag *bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.verboseLogsFlag = flag
+	if s.batcher != nil {
+		s.batcher.SetVerboseLogs(flag)
+	}
+}
+
+// SetServerConfig propagates server-level plugin configuration to the embed service.
+func (s *EmbedService) SetServerConfig(cfg *config.PluginConfig) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cfg != nil {
+		s.verboseLogsFlag = cfg.LLMVerboseLogs
+	}
+	if s.batcher != nil {
+		s.batcher.SetVerboseLogs(s.verboseLogsFlag)
+	}
 }
 
 // Close releases external connections.
