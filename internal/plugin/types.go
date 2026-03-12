@@ -91,3 +91,9 @@ type RetroactiveStats struct {
 	StartedAt  time.Time `json:"started_at"`
 	Errors     int64     `json:"errors"` // count of skipped engrams
 }
+
+// HardwareAwarePlugin is implemented by providers that can report
+// whether they are running with hardware acceleration (e.g., GPU).
+type HardwareAwarePlugin interface {
+	HardwareAccelerated() bool
+}

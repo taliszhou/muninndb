@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/scrypster/muninndb/internal/plugin"
 )
 
 func TestOllamaProvider_Init_Success(t *testing.T) {
@@ -98,10 +101,19 @@ func TestOllamaProvider_Embed(t *testing.T) {
 	}
 }
 
-func TestOllamaProvider_MaxBatchSize(t *testing.T) {
+func TestOllamaProvider_MaxBatchSize_Default(t *testing.T) {
+	// A fresh provider (useLegacyAPI=false) should return 64
 	provider := &OllamaProvider{}
+	if provider.MaxBatchSize() != 64 {
+		t.Errorf("expected batch size 64 (new batch endpoint), got %d", provider.MaxBatchSize())
+	}
+}
+
+func TestOllamaProvider_MaxBatchSize_Legacy(t *testing.T) {
+	// When legacy API is forced, MaxBatchSize must return 1
+	provider := &OllamaProvider{useLegacyAPI: true}
 	if provider.MaxBatchSize() != 1 {
-		t.Errorf("expected batch size 1, got %d", provider.MaxBatchSize())
+		t.Errorf("expected batch size 1 in legacy mode, got %d", provider.MaxBatchSize())
 	}
 }
 
@@ -347,5 +359,329 @@ func TestOllamaProvider_EmbedBatch_NonEmptyResult(t *testing.T) {
 	// Verify result contains expected values
 	if len(result) > 0 {
 		// Just verify we got some data back
+	}
+}
+
+// compile-time assertion — OllamaProvider implements HardwareAwarePlugin after Task 2
+var _ plugin.HardwareAwarePlugin = (*OllamaProvider)(nil)
+
+// --- New batch API tests ---
+
+// TestOllamaProvider_EmbedBatch_UsesBatchEndpoint verifies POST /api/embed is called
+// with the input array and that float64→float32 conversion is correct.
+func TestOllamaProvider_EmbedBatch_UsesBatchEndpoint(t *testing.T) {
+	var capturedPath string
+	var capturedBody ollamaBatchEmbedRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		capturedPath = r.URL.Path
+		if r.Method == "POST" && r.URL.Path == "/api/embed" {
+			json.NewDecoder(r.Body).Decode(&capturedBody)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(ollamaBatchEmbedResponse{
+				Embeddings: [][]float64{
+					{1.5, 2.5, 3.5},
+					{4.5, 5.5, 6.5},
+				},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	provider := &OllamaProvider{}
+	cfg := ProviderHTTPConfig{BaseURL: "http://" + server.Listener.Addr().String(), Model: "m"}
+	if _, err := provider.Init(context.Background(), cfg); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	result, err := provider.EmbedBatch(context.Background(), []string{"a", "b"})
+	if err != nil {
+		t.Fatalf("EmbedBatch failed: %v", err)
+	}
+
+	// Verify batch endpoint was called (not legacy)
+	if capturedPath != "/api/embed" {
+		t.Errorf("expected POST /api/embed, got %s", capturedPath)
+	}
+
+	// Verify input array was sent
+	if len(capturedBody.Input) != 2 {
+		t.Errorf("expected 2 inputs, got %d", len(capturedBody.Input))
+	}
+
+	// Verify float64→float32 conversion
+	expected := []float32{1.5, 2.5, 3.5, 4.5, 5.5, 6.5}
+	if len(result) != len(expected) {
+		t.Fatalf("expected %d values, got %d", len(expected), len(result))
+	}
+	for i, v := range result {
+		if v != expected[i] {
+			t.Errorf("result[%d] = %v, want %v", i, v, expected[i])
+		}
+	}
+}
+
+// TestOllamaProvider_EmbedBatch_LegacyFallback verifies that when /api/embed returns 404,
+// the provider falls back to /api/embeddings per-text loop.
+func TestOllamaProvider_EmbedBatch_LegacyFallback(t *testing.T) {
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.Method == "POST" && r.URL.Path == "/api/embeddings" {
+			callCount++
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(ollamaEmbedResponse{Embedding: []float64{0.1, 0.2}})
+			return
+		}
+		// /api/embed returns 404 → triggers legacy mode
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	provider := &OllamaProvider{}
+	cfg := ProviderHTTPConfig{BaseURL: "http://" + server.Listener.Addr().String(), Model: "m"}
+	if _, err := provider.Init(context.Background(), cfg); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	// useLegacyAPI should be set after Init
+	if !provider.useLegacyAPI {
+		t.Fatal("expected useLegacyAPI=true when /api/embed returns 404")
+	}
+
+	callCount = 0 // reset after Init probe
+	result, err := provider.EmbedBatch(context.Background(), []string{"x", "y"})
+	if err != nil {
+		t.Fatalf("EmbedBatch failed: %v", err)
+	}
+
+	// Expect 2 separate calls (one per text)
+	if callCount != 2 {
+		t.Errorf("expected 2 API calls in legacy mode, got %d", callCount)
+	}
+	if len(result) != 4 { // 2 texts × 2 dims
+		t.Errorf("expected 4 floats, got %d", len(result))
+	}
+}
+
+// deadlineCapturingTransport is a RoundTripper that captures the context deadline
+// from the outgoing request (client-side) before delegating to the real transport.
+type deadlineCapturingTransport struct {
+	inner          http.RoundTripper
+	capturedDL     time.Time
+	capturedDLOnce bool
+}
+
+func (t *deadlineCapturingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Only capture for POST /api/embed (not for Init probes)
+	if req.Method == "POST" && req.URL.Path == "/api/embed" {
+		if dl, ok := req.Context().Deadline(); ok {
+			t.capturedDL = dl
+			t.capturedDLOnce = true
+		}
+	}
+	return t.inner.RoundTrip(req)
+}
+
+// TestOllamaProvider_DynamicTimeout verifies that embedBatchNew applies a per-batch
+// context deadline proportional to batch size: 30s + len(texts)*10s.
+// For batch=64, the deadline must be >= 670s from request start.
+func TestOllamaProvider_DynamicTimeout(t *testing.T) {
+	const batchSize = 64
+	expectedMinTimeout := 30*time.Second + batchSize*10*time.Second // 670s
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.Method == "POST" && r.URL.Path == "/api/embed" {
+			var req ollamaBatchEmbedRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			embeddings := make([][]float64, len(req.Input))
+			for i := range embeddings {
+				embeddings[i] = []float64{0.1, 0.2}
+			}
+			json.NewEncoder(w).Encode(ollamaBatchEmbedResponse{Embeddings: embeddings})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	provider := &OllamaProvider{}
+	cfg := ProviderHTTPConfig{BaseURL: "http://" + server.Listener.Addr().String(), Model: "m"}
+	if _, err := provider.Init(context.Background(), cfg); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	// Swap in the intercepting transport after Init so we only capture the
+	// EmbedBatch call's deadline, not the Init probe deadline.
+	capturing := &deadlineCapturingTransport{inner: http.DefaultTransport}
+	provider.client = &http.Client{Transport: capturing}
+
+	texts := make([]string, batchSize)
+	beforeCall := time.Now()
+	if _, err := provider.EmbedBatch(context.Background(), texts); err != nil {
+		t.Fatalf("EmbedBatch failed: %v", err)
+	}
+
+	if !capturing.capturedDLOnce {
+		t.Fatal("expected request context to have a deadline set on the outgoing POST /api/embed")
+	}
+	remaining := capturing.capturedDL.Sub(beforeCall)
+	if remaining < expectedMinTimeout-2*time.Second {
+		t.Errorf("timeout too short: got ~%v, expected >= %v", remaining.Round(time.Second), expectedMinTimeout)
+	}
+}
+
+// TestOllamaProvider_HardwareDetection_GPU verifies hasGPU=true when /api/ps reports size_vram > 0.
+func TestOllamaProvider_HardwareDetection_GPU(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && r.URL.Path == "/" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.Method == "GET" && r.URL.Path == "/api/ps" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(ollamaPSResponse{
+				Models: []ollamaPSModel{
+					{Name: "test-model", SizeVRAM: 4294967296}, // 4 GB VRAM
+				},
+			})
+			return
+		}
+		if r.Method == "POST" && r.URL.Path == "/api/embed" {
+			json.NewEncoder(w).Encode(ollamaBatchEmbedResponse{
+				Embeddings: [][]float64{{0.1, 0.2}},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	provider := &OllamaProvider{}
+	cfg := ProviderHTTPConfig{BaseURL: "http://" + server.Listener.Addr().String(), Model: "test-model"}
+	if _, err := provider.Init(context.Background(), cfg); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	if !provider.HardwareAccelerated() {
+		t.Error("expected HardwareAccelerated()=true when size_vram > 0")
+	}
+}
+
+// TestOllamaProvider_HardwareDetection_CPU verifies hasGPU=false when size_vram == 0.
+func TestOllamaProvider_HardwareDetection_CPU(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && r.URL.Path == "/" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.Method == "GET" && r.URL.Path == "/api/ps" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(ollamaPSResponse{
+				Models: []ollamaPSModel{
+					{Name: "test-model", SizeVRAM: 0},
+				},
+			})
+			return
+		}
+		if r.Method == "POST" && r.URL.Path == "/api/embed" {
+			json.NewEncoder(w).Encode(ollamaBatchEmbedResponse{
+				Embeddings: [][]float64{{0.1, 0.2}},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	provider := &OllamaProvider{}
+	cfg := ProviderHTTPConfig{BaseURL: "http://" + server.Listener.Addr().String(), Model: "test-model"}
+	if _, err := provider.Init(context.Background(), cfg); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	if provider.HardwareAccelerated() {
+		t.Error("expected HardwareAccelerated()=false when size_vram == 0")
+	}
+}
+
+// TestOllamaProvider_HardwareDetection_APIUnavailable verifies hasGPU=false (graceful default)
+// when /api/ps returns 404 or an error.
+func TestOllamaProvider_HardwareDetection_APIUnavailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && r.URL.Path == "/" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.Method == "POST" && r.URL.Path == "/api/embed" {
+			json.NewEncoder(w).Encode(ollamaBatchEmbedResponse{
+				Embeddings: [][]float64{{0.1, 0.2}},
+			})
+			return
+		}
+		// /api/ps returns 404 (older Ollama)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	provider := &OllamaProvider{}
+	cfg := ProviderHTTPConfig{BaseURL: "http://" + server.Listener.Addr().String(), Model: "m"}
+	if _, err := provider.Init(context.Background(), cfg); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	if provider.HardwareAccelerated() {
+		t.Error("expected HardwareAccelerated()=false when /api/ps unavailable")
+	}
+}
+
+// TestOllamaProvider_BodyClosedPerIteration verifies the legacy loop closes the
+// response body after each iteration, not at function return.
+// We verify this indirectly: if bodies were not closed, the server would exhaust
+// its connection pool on many requests; we simply verify the legacy loop completes
+// N requests without error (relying on inline closure correctness).
+func TestOllamaProvider_BodyClosedPerIteration(t *testing.T) {
+	const n = 10
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.Method == "POST" && r.URL.Path == "/api/embeddings" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(ollamaEmbedResponse{Embedding: []float64{0.1}})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	provider := &OllamaProvider{useLegacyAPI: true}
+	provider.baseURL = "http://" + server.Listener.Addr().String()
+	provider.model = "m"
+	transport := &http.Transport{MaxIdleConns: 2, MaxIdleConnsPerHost: 2}
+	provider.client = &http.Client{Timeout: 5 * time.Second, Transport: transport}
+
+	texts := make([]string, n)
+	for i := range texts {
+		texts[i] = "text"
+	}
+
+	_, err := provider.EmbedBatch(context.Background(), texts)
+	if err != nil {
+		t.Fatalf("expected no error with %d legacy requests, got: %v", n, err)
 	}
 }

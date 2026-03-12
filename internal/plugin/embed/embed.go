@@ -235,6 +235,18 @@ func (s *EmbedService) Close() error {
 	return nil
 }
 
+// HardwareAccelerated implements plugin.HardwareAwarePlugin by delegating to
+// the inner provider if it supports hardware detection.
+func (s *EmbedService) HardwareAccelerated() bool {
+	s.mu.Lock()
+	prov := s.provider
+	s.mu.Unlock()
+	if h, ok := prov.(plugin.HardwareAwarePlugin); ok {
+		return h.HardwareAccelerated()
+	}
+	return false
+}
+
 // createRateLimiter creates a rate limiter appropriate for the provider.
 func (s *EmbedService) createRateLimiter(scheme plugin.ProviderScheme, options map[string]string) *TokenBucketLimiter {
 	// Ollama is local, no rate limiting

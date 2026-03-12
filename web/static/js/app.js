@@ -68,6 +68,7 @@ document.addEventListener('alpine:init', () => {
     _cy: null,
     entityGraphLoaded: false,
     entityGraphStatus: '',
+    entityGraphLabelMode: 'full',
     _entityCy: null,
 
     // Session
@@ -198,19 +199,20 @@ document.addEventListener('alpine:init', () => {
       embedApiKey: '',
       embedUrl: '',           // custom base URL for openai-compatible endpoints
       embedShowForm: false,
-      embedSaved: false,
       embedError: '',
       enrichProvider: 'none', // 'none' | 'ollama' | 'openai' | 'anthropic'
       enrichOllamaModel: 'llama3.2',
       enrichModel: 'claude-haiku-4-5-20251001',
       enrichApiKey: '',
       enrichShowForm: false,
-      enrichSaved: false,
       enrichError: '',
       ollamaModels: [],
       ollamaEmbedModels: [],
       ollamaDetected: null,   // null=unchecked, true=running, false=not found
       ollamaChecking: false,
+      embedRatePerSec: 0,       // from embed-status API: engrams/sec, 0 when idle
+      embedETASecs: 0,          // from embed-status API: seconds until complete, 0 when idle
+      embedHardwareGPU: null,   // null = unknown/cloud; true = GPU; false = CPU-only Ollama
     },
 
     // Vault actions
@@ -771,7 +773,6 @@ document.addEventListener('alpine:init', () => {
         // ActivateRequest uses context:[]string, max_results:int
         const body = {
             context: [this.searchQuery.trim()],
-            vault: this.vault,
             max_results: 20,
         };
         if (this.searchMode && this.searchMode !== 'balanced') {
@@ -926,7 +927,6 @@ document.addEventListener('alpine:init', () => {
             concept: form.concept,
             content: form.content,
             tags,
-            vault: this.vault,
             confidence: parseFloat(form.confidence) || 0.8,
           }),
         });
@@ -1010,7 +1010,7 @@ document.addEventListener('alpine:init', () => {
           '/api/engrams/' + encodeURIComponent(this.selectedMemory.id) + '/tags?vault=' + encodeURIComponent(this.vault),
           {
             method: 'PUT',
-            body: JSON.stringify({ vault: this.vault, tags }),
+            body: JSON.stringify({ tags }),
           }
         );
         this.selectedMemory = { ...this.selectedMemory, tags: resp.tags };
@@ -1051,7 +1051,6 @@ document.addEventListener('alpine:init', () => {
             target_id: this.linkModal.targetId.trim(),
             rel_type: parseInt(this.linkModal.relType, 10),
             weight: parseFloat(this.linkModal.weight),
-            vault: this.vault,
           }),
         });
         this.closeLinkModal();
@@ -1117,13 +1116,16 @@ document.addEventListener('alpine:init', () => {
 
     // ── Graph ──────────────────────────────────────────────────────────────
     graphShowOrphans: false,
+    graphLimit: 50,
 
     async loadGraph() {
       this.addNotification('info', 'Loading graph…');
       try {
         // Use GET /api/engrams for node listing
+        const limit = Math.max(1, Math.min(200, parseInt(this.graphLimit, 10) || 50));
+        this.graphLimit = limit;
         const data = await this.apiCall(
-          '/api/engrams?vault=' + encodeURIComponent(this.vault) + '&limit=50&offset=0'
+          '/api/engrams?vault=' + encodeURIComponent(this.vault) + '&limit=' + limit + '&offset=0'
         );
         const engrams = data.engrams || [];
         if (!engrams.length) {
@@ -1137,7 +1139,6 @@ document.addEventListener('alpine:init', () => {
           method: 'POST',
           body: JSON.stringify({
             ids: engrams.map(e => e.id),
-            vault: this.vault,
           }),
         });
         const linksMap = batchResp.links || {};
@@ -1323,8 +1324,14 @@ document.addEventListener('alpine:init', () => {
       this._cy.nodes().forEach(node => {
         const lbl = mode === 'full' ? node.data('label')
                   : mode === 'short' ? node.data('shortLabel')
-                  : '';
-        node.style('label', lbl);
+                  : node.data('label');
+        node.style({
+          label: lbl,
+          'text-opacity': mode === 'none' ? 0 : 1,
+        });
+      });
+      this._cy.edges().forEach(edge => {
+        edge.style({ 'text-opacity': mode === 'none' ? 0 : 1 });
       });
     },
 
@@ -1352,6 +1359,7 @@ document.addEventListener('alpine:init', () => {
             data: {
               id: n.id,
               label: n.id,
+              shortLabel: n.id.length > 20 ? n.id.slice(0, 18) + '…' : n.id,
               type: entityType,
               size: 16,
               color: this.getEntityTypeColor(entityType),
@@ -1400,17 +1408,19 @@ document.addEventListener('alpine:init', () => {
                 'height': 'data(size)',
                 'label': 'data(label)',
                 'color': '#e2e8f0',
-                'font-size': '11px',
-                'text-valign': 'center',
+                'font-size': '10px',
+                'text-valign': 'bottom',
                 'text-halign': 'center',
+                'text-margin-y': 6,
                 'border-width': 'data(borderWidth)',
                 'border-color': 'data(borderColor)',
-                'text-background-opacity': 0.6,
-                'text-background-color': 'rgba(0,0,0,0.5)',
+                'text-background-opacity': 0.7,
+                'text-background-color': 'rgba(0,0,0,0.6)',
                 'text-background-padding': '2px',
                 'text-background-shape': 'roundrectangle',
-                'text-wrap': 'wrap',
-                'text-max-width': '80px'
+                'text-wrap': 'ellipsis',
+                'text-max-width': '100px',
+                'min-zoomed-font-size': 8
               }
             },
             {
@@ -1444,7 +1454,19 @@ document.addEventListener('alpine:init', () => {
             name: 'fcose',
             animate: true,
             animationDuration: 600,
-            animationEasing: 'ease-out'
+            animationEasing: 'ease-out',
+            randomize: true,
+            padding: 60,
+            idealEdgeLength: 250,
+            nodeRepulsion: 50000,
+            edgeElasticity: 0.1,
+            gravity: 0.02,
+            gravityRange: 1.5,
+            numIter: 5000,
+            tile: true,
+            tilingPaddingVertical: 60,
+            tilingPaddingHorizontal: 60,
+            nodeSeparation: 200
           },
           wheelSensitivity: 0.3
         });
@@ -1456,6 +1478,7 @@ document.addEventListener('alpine:init', () => {
         });
 
         this.entityGraphLoaded = true;
+        this._applyEntityGraphLabelStyle();
         this.entityGraphStatus = 'Loaded ' + nodes.length + ' entities, ' + edges.length + ' relationships';
         this.addNotification('success', this.entityGraphStatus);
       } catch (err) {
@@ -1494,6 +1517,28 @@ document.addEventListener('alpine:init', () => {
 
     entityGraphFit() {
       if (this._entityCy) { this._entityCy.fit(); }
+    },
+    entityGraphCycleLabel() {
+      const modes = ['full', 'short', 'none'];
+      const next = modes[(modes.indexOf(this.entityGraphLabelMode) + 1) % modes.length];
+      this.entityGraphLabelMode = next;
+      this._applyEntityGraphLabelStyle();
+    },
+    _applyEntityGraphLabelStyle() {
+      if (!this._entityCy) return;
+      const mode = this.entityGraphLabelMode;
+      this._entityCy.nodes().forEach(node => {
+        const lbl = mode === 'full' ? node.data('label')
+                  : mode === 'short' ? node.data('shortLabel')
+                  : node.data('label');
+        node.style({
+          label: lbl,
+          'text-opacity': mode === 'none' ? 0 : 1,
+        });
+      });
+      this._entityCy.edges().forEach(edge => {
+        edge.style({ 'text-opacity': mode === 'none' ? 0 : 1 });
+      });
     },
 
     // ── Session ────────────────────────────────────────────────────────────
@@ -1543,11 +1588,20 @@ document.addEventListener('alpine:init', () => {
     // ── Settings ───────────────────────────────────────────────────────────
     async loadEmbedStatus() {
       try {
-        this.embedStatus = await this.apiCall('/api/admin/embed/status');
+        const data = await this.apiCall('/api/admin/embed/status');
+        this.embedStatus = data;
         // Reflect the active provider in the plugin config UI (local is default, not a plugin choice)
-        const p = this.embedStatus?.provider;
+        const p = data?.provider;
         if (p && p !== 'none' && p !== 'local') {
           this.pluginCfg.embedProvider = p;
+        }
+        this.pluginCfg.embedRatePerSec = data.rate_per_sec ?? 0;
+        this.pluginCfg.embedETASecs    = data.eta_seconds ?? 0;
+        // hardware_accelerated is absent for cloud providers; present (true/false) for Ollama
+        if (Object.prototype.hasOwnProperty.call(data, 'hardware_accelerated')) {
+          this.pluginCfg.embedHardwareGPU = data.hardware_accelerated;
+        } else {
+          this.pluginCfg.embedHardwareGPU = null;
         }
       } catch (_) {
         // Non-fatal: embedStatus stays null, UI shows fallback
@@ -1854,6 +1908,31 @@ document.addEventListener('alpine:init', () => {
       const embedded = this.embedStatus.embedded_count;
       if (total <= 0 || embedded < 0) return 0;
       return Math.min(100, Math.round((embedded / total) * 100));
+    },
+
+    // Returns a formatted rate string like "0.7s/embedding", or '' when idle.
+    embedSecsPerItem() {
+      if (this.pluginCfg.embedRatePerSec > 0) {
+        return (1 / this.pluginCfg.embedRatePerSec).toFixed(1) + 's/embedding';
+      }
+      return '';
+    },
+
+    // Returns a human-readable ETA string like "~3 min", or '' when idle.
+    embedETADisplay() {
+      const secs = this.pluginCfg.embedETASecs;
+      if (secs <= 0) return '';
+      if (secs < 60) return '< 1 min';
+      const mins = Math.round(secs / 60);
+      if (mins < 60) return '~' + mins + ' min';
+      const hrs = Math.floor(mins / 60);
+      const rem = mins % 60;
+      return rem > 0 ? '~' + hrs + ' hr ' + rem + ' min' : '~' + hrs + ' hr';
+    },
+
+    // True only when Ollama is the embed provider and hardware_accelerated is explicitly false.
+    get embedIsCPU() {
+      return this.pluginCfg.embedHardwareGPU === false;
     },
 
     // ── Cluster ────────────────────────────────────────────────────────────
@@ -2256,9 +2335,7 @@ document.addEventListener('alpine:init', () => {
     // ── Plugin config save ───────────────────────────────────────────────────
     async savePluginConfig(section) {
       const c = this.pluginCfg;
-      const savedKey = section + 'Saved';
       const errorKey = section + 'Error';
-      c[savedKey] = false;
       c[errorKey] = '';
 
       // Build payload from current pluginCfg state.
@@ -2277,8 +2354,9 @@ document.addEventListener('alpine:init', () => {
 
       try {
         await this.apiCall('/api/admin/plugin-config', { method: 'PUT', body: JSON.stringify(payload) });
-        c[savedKey] = true;
-        setTimeout(() => { c[savedKey] = false; }, 4000);
+        this.addNotification('success', section === 'embed'
+          ? 'Embedding provider saved — restart MuninnDB to apply.'
+          : 'Enrichment provider saved — restart MuninnDB to apply.');
         if (section === 'embed') c.embedShowForm = false;
         if (section === 'enrich') c.enrichShowForm = false;
       } catch (e) {
@@ -2620,7 +2698,6 @@ document.addEventListener('alpine:init', () => {
         const data = await this.apiCall('/api/explain?vault=' + encodeURIComponent(this.vault), {
           method: 'POST',
           body: JSON.stringify({
-            vault: this.vault,
             engram_id: engramId,
             query: [this.searchQuery.trim()],
           }),
@@ -2673,7 +2750,6 @@ document.addEventListener('alpine:init', () => {
         const data = await this.apiCall('/api/consolidate?vault=' + encodeURIComponent(this.vault), {
           method: 'POST',
           body: JSON.stringify({
-            vault: this.vault,
             ids: this.selectedMemoryIds,
             merged_content: this.consolidateModal.mergedContent.trim(),
           }),
@@ -2713,7 +2789,6 @@ document.addEventListener('alpine:init', () => {
         const data = await this.apiCall('/api/decide?vault=' + encodeURIComponent(this.vault), {
           method: 'POST',
           body: JSON.stringify({
-            vault: this.vault,
             decision: this.decideModal.decision.trim(),
             rationale: this.decideModal.rationale.trim(),
             alternatives,

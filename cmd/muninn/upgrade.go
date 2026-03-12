@@ -253,7 +253,11 @@ func runUpgrade(args []string) {
 		if daemonWasRunning {
 			fmt.Println()
 			fmt.Printf("  %-28s", "Restarting daemon...")
-			runStart(true)
+			if err := runStart(true); err != nil {
+				fmt.Println(" ✗")
+				fmt.Fprintf(os.Stderr, "  Failed to restart daemon: %v\n", err)
+				osExit(1)
+			}
 			fmt.Println(" ✓")
 			fmt.Println()
 			fmt.Printf("  Web UI → http://127.0.0.1:8476\n")
@@ -543,9 +547,13 @@ func selfUpdate(latest string) error {
 	// Restart daemon if it was running before
 	if daemonWasRunning {
 		fmt.Printf("  %-28s", "Restarting daemon...")
-		runStart(true) // manages its own output and error handling
+		if err := runStart(true); err != nil {
+			fmt.Println(" ✗")
+			return fmt.Errorf("restart failed: %w", err)
+		}
 		fmt.Println(" ✓")
 	}
 
 	return nil
 }
+
