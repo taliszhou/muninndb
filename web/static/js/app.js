@@ -515,6 +515,23 @@ document.addEventListener('alpine:init', () => {
         }
       };
 
+      es.addEventListener('error', (e) => {
+        let msg = 'Live feed error';
+        try {
+          const data = JSON.parse(e.data);
+          if (data.error) msg = 'Live feed: ' + data.error;
+        } catch (_) {}
+        console.warn('[muninn] SSE error event:', msg);
+        this.addNotification('error', msg);
+        this.liveConnected = false;
+        es.close();
+        this._es = null;
+        window._muninnSSE = null;
+        const delay = Math.min(500 * Math.pow(1.5, this._esRetries), 30000);
+        this._esRetries++;
+        setTimeout(() => this.connectLive(), delay);
+      });
+
       this._es = es;
     },
 
