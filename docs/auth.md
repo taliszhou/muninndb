@@ -48,6 +48,8 @@ Admin credentials authenticate to:
 
 A vault is either **open** (no API key required) or **locked** (API key required). The built-in `default` vault ships **open** out of the box so that any MCP client can connect without configuration. Additional vaults you create start locked and must be explicitly opened.
 
+Open vault requests currently run in `observe` mode unless a caller presents a different API key. That preserves the historical unauthenticated read behavior while avoiding cognitive-state writes from anonymous traffic.
+
 A vault can have multiple API keys — one per integration point. You might have:
 
 ```
@@ -64,7 +66,7 @@ vault: default
 | `full` | Yes | **Yes** — temporal scores refresh, Hebbian weights update, access counts increment | AI agents, primary integrations, anything that is *part of* the brain |
 | `observe` | Yes | **No** — scores are computed but nothing is persisted | Dashboards, analytics, read-only partners, exports |
 
-The `observe` mode exists because the vault's cognitive state is the thing of value. A dashboard reading engrams 1000 times a day should not inflate access counts and distort what the AI agent sees as relevant. `observe` keys see the brain; they don't affect it.
+The `observe` mode exists because the vault's cognitive state is the thing of value. A dashboard reading engrams 1000 times a day should not inflate access counts and distort what the AI agent sees as relevant. `observe` keys see the brain; they don't affect it, and semantically mutating REST routes are rejected.
 
 ### Key format
 

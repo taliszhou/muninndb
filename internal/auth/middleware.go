@@ -64,6 +64,10 @@ func (s *Store) VaultAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		ctx := context.WithValue(r.Context(), ContextVault, vault)
+		// REVIEW(maintainer): public vault requests remain ModeObserve for backward
+		// compatibility with the historical unauthenticated read behavior.
+		// Confirm at PR time whether public unauthenticated access should stay
+		// observe or move to full in a follow-up.
 		ctx = context.WithValue(ctx, ContextMode, ModeObserve)
 		next(w, r.WithContext(ctx))
 	}
@@ -129,7 +133,8 @@ func (s *Store) VaultAuthWithAdminBypass(secret []byte, next http.HandlerFunc) h
 //
 //   "observe" mode — engine-layer enforcement: reads are allowed but cognitive
 //   mutations (Hebbian associations, predictive activation) are suppressed via
-//   ObserveFromContext. The engine decides what to skip.
+//   ObserveFromContext. ReadOnlyGuard additionally blocks semantically mutating
+//   REST routes so observe keys stay read-only at the API surface too.
 //
 //   "write" mode (ingest-only) — middleware-layer enforcement: read endpoints
 //   return 403 before the engine is called at all. WriteOnlyGuard is applied at
@@ -162,6 +167,28 @@ func WriteOnlyGuard(next http.HandlerFunc) http.HandlerFunc {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
 			w.Write([]byte(`{"error":{"code":"FORBIDDEN","message":"write-only key cannot read"}}`))
+			return
+		}
+		next(w, r)
+	}
+}
+
+// ReadOnlyFromContext returns true for API key modes that must not call
+// semantically mutating REST endpoints. Route registration decides which
+// endpoints are mutating; do not infer this from HTTP verb alone.
+func ReadOnlyFromContext(ctx context.Context) bool {
+	mode, _ := ctx.Value(ContextMode).(string)
+	return mode == ModeObserve
+}
+
+// ReadOnlyGuard is HTTP middleware that returns 403 for read-only mode
+// requests when attached to semantically mutating endpoints.
+func ReadOnlyGuard(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if ReadOnlyFromContext(r.Context()) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"error":{"code":"FORBIDDEN","message":"read-only key cannot write"}}`))
 			return
 		}
 		next(w, r)

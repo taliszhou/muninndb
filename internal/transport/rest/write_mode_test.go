@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/scrypster/muninndb/internal/auth"
@@ -164,6 +165,77 @@ func TestWriteOnlyMode_ObserveModeCanRead(t *testing.T) {
 			auth.WriteOnlyGuard(tc.handler)(w, req)
 			if w.Code == http.StatusForbidden {
 				t.Errorf("%s: observe mode must not return 403", tc.name)
+			}
+		})
+	}
+}
+
+func TestReadOnlyMode_MutatingHandlersBlocked(t *testing.T) {
+	s := newWriteModeTestServer(t)
+
+	cases := []struct {
+		name    string
+		method  string
+		handler http.HandlerFunc
+	}{
+		{"CreateEngram", http.MethodPost, s.handleCreateEngram},
+		{"BatchCreate", http.MethodPost, s.handleBatchCreate},
+		{"Link", http.MethodPost, s.handleLink},
+		{"DeleteEngram", http.MethodDelete, s.handleDeleteEngram},
+		{"SetState", http.MethodPut, s.handleSetState},
+		{"UpdateTags", http.MethodPut, s.handleUpdateTags},
+		{"Evolve", http.MethodPost, s.handleEvolve},
+		{"Consolidate", http.MethodPost, s.handleConsolidateEngrams},
+		{"Decide", http.MethodPost, s.handleDecide},
+		{"Restore", http.MethodPost, s.handleRestore},
+		{"RetryEnrich", http.MethodPost, s.handleRetryEnrich},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, "/", nil)
+			req = withObserveCtx(req)
+			w := httptest.NewRecorder()
+			auth.ReadOnlyGuard(tc.handler)(w, req)
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestReadOnlyMode_SemanticReadHandlersPassThrough(t *testing.T) {
+	store := newTestAuthStore(t)
+	if err := store.SetVaultConfig(auth.VaultConfig{Name: "default", Public: false}); err != nil {
+		t.Fatalf("SetVaultConfig: %v", err)
+	}
+	s := newTestServer(t, store)
+
+	observeToken, _, err := store.GenerateAPIKey("default", "observer", auth.ModeObserve, nil)
+	if err != nil {
+		t.Fatalf("GenerateAPIKey observe: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		path string
+		body string
+	}{
+		{"Activate", "/api/activate?vault=default", `{"context":["x"]}`},
+		{"BatchGetEngramLinks", "/api/engrams/links/batch?vault=default", `{"ids":["id1"]}`},
+		{"Traverse", "/api/traverse?vault=default", `{"start_id":"root-id"}`},
+		{"Explain", "/api/explain?vault=default", `{"engram_id":"some-id"}`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
+			req.Header.Set("Authorization", "Bearer "+observeToken)
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			s.mux.ServeHTTP(w, req)
+			if w.Code == http.StatusForbidden {
+				t.Fatalf("semantic read endpoint must remain available to observe keys")
 			}
 		})
 	}
