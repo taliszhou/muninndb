@@ -1582,8 +1582,8 @@ func (e *slowIdempotentEngine) WhereLeftOff(ctx context.Context, vault string, l
 func (e *slowIdempotentEngine) FindByEntity(ctx context.Context, vault, entityName string, limit int) ([]*storage.Engram, error) {
 	return (&fakeEngine{}).FindByEntity(ctx, vault, entityName, limit)
 }
-func (e *slowIdempotentEngine) SetEntityState(ctx context.Context, entityName, state, mergedInto string) error {
-	return (&fakeEngine{}).SetEntityState(ctx, entityName, state, mergedInto)
+func (e *slowIdempotentEngine) SetEntityState(ctx context.Context, entityName, state, mergedInto, entityType string) error {
+	return (&fakeEngine{}).SetEntityState(ctx, entityName, state, mergedInto, entityType)
 }
 func (e *slowIdempotentEngine) GetEntityClusters(ctx context.Context, vault string, minCount, topN int) ([]EntityClusterResult, error) {
 	return (&fakeEngine{}).GetEntityClusters(ctx, vault, minCount, topN)
@@ -1670,7 +1670,7 @@ func TestHandleRemember_ConcurrentSameOpID(t *testing.T) {
 // entityStateEngine is a minimal engine stub for muninn_entity_state tests.
 type entityStateEngine struct{ fakeEngine }
 
-func (e *entityStateEngine) SetEntityState(_ context.Context, name, state, mergedInto string) error {
+func (e *entityStateEngine) SetEntityState(_ context.Context, name, state, mergedInto, entityType string) error {
 	if name == "" {
 		return fmt.Errorf("entity_name is required")
 	}
@@ -1680,7 +1680,7 @@ func (e *entityStateEngine) SetEntityState(_ context.Context, name, state, merge
 // entityStateErrEngine returns an error from SetEntityState.
 type entityStateErrEngine struct{ fakeEngine }
 
-func (e *entityStateErrEngine) SetEntityState(_ context.Context, _, _, _ string) error {
+func (e *entityStateErrEngine) SetEntityState(_ context.Context, _, _, _, _ string) error {
 	return fmt.Errorf("entity %q not found", "PostgreSQL")
 }
 
@@ -1772,6 +1772,39 @@ func TestHandleEntityStateMergedWithoutMergedInto(t *testing.T) {
 	}
 	if resp.Error != nil && !strings.Contains(resp.Error.Message, "merged_into") {
 		t.Errorf("expected error message to mention merged_into requirement, got: %q", resp.Error.Message)
+	}
+}
+
+func TestHandleEntityStateWithType(t *testing.T) {
+	// Verify that providing a "type" field succeeds and is reflected in the response.
+	srv := newTestServerWith(&entityStateEngine{})
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_entity_state","arguments":{"vault":"default","entity_name":"Modbus","state":"active","type":"protocol"}}}`
+	w := postRPC(t, srv, body)
+	resp := decodeResp(t, w.Body.String())
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+	content := extractInnerJSON(t, resp)
+	if content["type"] != "protocol" {
+		t.Errorf("type = %v, want protocol", content["type"])
+	}
+	if content["entity"] != "Modbus" {
+		t.Errorf("entity = %v, want Modbus", content["entity"])
+	}
+}
+
+func TestHandleEntityStateWithoutTypeOmitsTypeField(t *testing.T) {
+	// Verify that omitting "type" does not include a "type" key in the response.
+	srv := newTestServerWith(&entityStateEngine{})
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_entity_state","arguments":{"vault":"default","entity_name":"PostgreSQL","state":"active"}}}`
+	w := postRPC(t, srv, body)
+	resp := decodeResp(t, w.Body.String())
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+	content := extractInnerJSON(t, resp)
+	if _, hasType := content["type"]; hasType {
+		t.Errorf("response should not include 'type' field when type was not provided")
 	}
 }
 

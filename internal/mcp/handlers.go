@@ -889,16 +889,21 @@ func (s *MCPServer) handleEntityState(ctx context.Context, w http.ResponseWriter
 		sendError(w, id, -32602, "invalid params: 'merged_into' is required when state=merged")
 		return
 	}
+	entityType, _ := args["type"].(string)
 
-	if err := s.engine.SetEntityState(ctx, entityName, state, mergedInto); err != nil {
+	if err := s.engine.SetEntityState(ctx, entityName, state, mergedInto, entityType); err != nil {
 		sendError(w, id, -32000, "tool error: "+err.Error())
 		return
 	}
-	out, _ := json.Marshal(map[string]any{
+	resp := map[string]any{
 		"entity": entityName,
 		"state":  state,
 		"ok":     true,
-	})
+	}
+	if entityType != "" {
+		resp["type"] = entityType
+	}
+	out, _ := json.Marshal(resp)
 	sendResult(w, id, textContent(string(out)))
 }
 

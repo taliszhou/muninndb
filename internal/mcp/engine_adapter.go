@@ -329,8 +329,8 @@ func (a *mcpEngineAdapter) WriteIdempotency(ctx context.Context, opID, engramID 
 	return a.eng.Store().WriteIdempotency(ctx, opID, engramID)
 }
 
-func (a *mcpEngineAdapter) SetEntityState(ctx context.Context, entityName, state, mergedInto string) error {
-	return a.eng.SetEntityState(ctx, entityName, state, mergedInto)
+func (a *mcpEngineAdapter) SetEntityState(ctx context.Context, entityName, state, mergedInto, entityType string) error {
+	return a.eng.SetEntityState(ctx, entityName, state, mergedInto, entityType)
 }
 
 func (a *mcpEngineAdapter) ExportGraph(ctx context.Context, vault string, includeEngrams bool) (*engine.ExportGraph, error) {
