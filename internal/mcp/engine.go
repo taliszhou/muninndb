@@ -97,9 +97,10 @@ type EngineInterface interface {
 	// WriteIdempotency stores an idempotency receipt (op_id → engramID).
 	WriteIdempotency(ctx context.Context, opID, engramID string) error
 
-	// SetEntityState sets the lifecycle state of a named entity.
+	// SetEntityState sets the lifecycle state of a named entity, and optionally
+	// corrects its type. entityType may be empty (preserves existing type).
 	// For state="merged", mergedInto must be the canonical entity name.
-	SetEntityState(ctx context.Context, entityName, state, mergedInto string) error
+	SetEntityState(ctx context.Context, entityName, state, mergedInto, entityType string) error
 
 	// GetEntityClusters returns entity pairs that frequently co-occur in the same engrams,
 	// sorted by count descending. Only pairs with count >= minCount are returned.

@@ -112,7 +112,7 @@ func (f *fakeEngine) CheckIdempotency(_ context.Context, _ string) (*storage.Ide
 func (f *fakeEngine) WriteIdempotency(_ context.Context, _, _ string) error {
 	return nil
 }
-func (f *fakeEngine) SetEntityState(_ context.Context, _, _, _ string) error {
+func (f *fakeEngine) SetEntityState(_ context.Context, _, _, _, _ string) error {
 	return nil
 }
 func (f *fakeEngine) GetEntityClusters(_ context.Context, _ string, _, _ int) ([]EntityClusterResult, error) {
