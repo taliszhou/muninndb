@@ -254,3 +254,108 @@ func TestDeleteEntityEngramLink_NoopOnMissing(t *testing.T) {
 	// Must not error on a link that doesn't exist.
 	require.NoError(t, store.DeleteEntityEngramLink(ctx, ws, id, "NonExistent"))
 }
+
+// ---------------------------------------------------------------------------
+// RelinkEntityEngramLink
+// ---------------------------------------------------------------------------
+
+// TestRelinkEntityEngramLink_AtomicMoveWritesBAndDeletesA verifies that a single
+// RelinkEntityEngramLink call correctly writes the 0x20/0x23 links for toEntity
+// and removes the 0x20/0x23 links for fromEntity — all visible as one atomic change.
+func TestRelinkEntityEngramLink_AtomicMoveWritesBAndDeletesA(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	ws := store.VaultPrefix("relink-entity-link")
+
+	require.NoError(t, store.UpsertEntityRecord(ctx, EntityRecord{
+		Name: "Postgre SQL", Type: "database", Confidence: 0.8,
+	}, "test"))
+	require.NoError(t, store.UpsertEntityRecord(ctx, EntityRecord{
+		Name: "PostgreSQL", Type: "database", Confidence: 0.9,
+	}, "test"))
+
+	eng := makeTestEngram("relink test engram")
+	_, err := store.WriteEngram(ctx, ws, eng)
+	require.NoError(t, err)
+	require.NoError(t, store.WriteEntityEngramLink(ctx, ws, eng.ID, "Postgre SQL"))
+
+	// Baseline: A has one reverse link, B has none.
+	var beforeA, beforeB []ULID
+	require.NoError(t, store.ScanEntityEngrams(ctx, "Postgre SQL", func(_ [8]byte, id ULID) error {
+		beforeA = append(beforeA, id)
+		return nil
+	}))
+	require.NoError(t, store.ScanEntityEngrams(ctx, "PostgreSQL", func(_ [8]byte, id ULID) error {
+		beforeB = append(beforeB, id)
+		return nil
+	}))
+	require.Len(t, beforeA, 1, "entity A must have one reverse link before relink")
+	require.Empty(t, beforeB, "entity B must have no reverse links before relink")
+
+	// Relink atomically.
+	require.NoError(t, store.RelinkEntityEngramLink(ctx, ws, eng.ID, "Postgre SQL", "PostgreSQL"))
+
+	// After relink: A's 0x23 reverse link must be gone.
+	var afterA []ULID
+	require.NoError(t, store.ScanEntityEngrams(ctx, "Postgre SQL", func(_ [8]byte, id ULID) error {
+		afterA = append(afterA, id)
+		return nil
+	}))
+	assert.Empty(t, afterA, "entity A 0x23 reverse link must be removed by RelinkEntityEngramLink")
+
+	// After relink: B's 0x23 reverse link must be present.
+	var afterB []ULID
+	require.NoError(t, store.ScanEntityEngrams(ctx, "PostgreSQL", func(_ [8]byte, id ULID) error {
+		afterB = append(afterB, id)
+		return nil
+	}))
+	require.Len(t, afterB, 1, "entity B must have one reverse link after relink")
+
+	// After relink: forward index must show B, not A.
+	var entities []string
+	require.NoError(t, store.ScanEngramEntities(ctx, ws, eng.ID, func(name string) error {
+		entities = append(entities, name)
+		return nil
+	}))
+	assert.Contains(t, entities, "PostgreSQL", "0x20 forward link for B must exist after relink")
+	assert.NotContains(t, entities, "Postgre SQL", "0x20 forward link for A must be gone after relink")
+}
+
+// TestRelinkEntityEngramLink_IdempotentOnRepeat verifies that calling RelinkEntityEngramLink
+// twice (e.g. after a crash-restart) produces the same correct state.
+func TestRelinkEntityEngramLink_IdempotentOnRepeat(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	ws := store.VaultPrefix("relink-entity-link-idempotent")
+
+	require.NoError(t, store.UpsertEntityRecord(ctx, EntityRecord{
+		Name: "Postgre SQL", Type: "database", Confidence: 0.8,
+	}, "test"))
+	require.NoError(t, store.UpsertEntityRecord(ctx, EntityRecord{
+		Name: "PostgreSQL", Type: "database", Confidence: 0.9,
+	}, "test"))
+
+	eng := makeTestEngram("idempotent relink engram")
+	_, err := store.WriteEngram(ctx, ws, eng)
+	require.NoError(t, err)
+	require.NoError(t, store.WriteEntityEngramLink(ctx, ws, eng.ID, "Postgre SQL"))
+
+	// First relink.
+	require.NoError(t, store.RelinkEntityEngramLink(ctx, ws, eng.ID, "Postgre SQL", "PostgreSQL"))
+	// Second relink — must not error and must leave state identical.
+	require.NoError(t, store.RelinkEntityEngramLink(ctx, ws, eng.ID, "Postgre SQL", "PostgreSQL"))
+
+	var afterA []ULID
+	require.NoError(t, store.ScanEntityEngrams(ctx, "Postgre SQL", func(_ [8]byte, id ULID) error {
+		afterA = append(afterA, id)
+		return nil
+	}))
+	assert.Empty(t, afterA, "entity A must have no reverse links after repeated relink")
+
+	var afterB []ULID
+	require.NoError(t, store.ScanEntityEngrams(ctx, "PostgreSQL", func(_ [8]byte, id ULID) error {
+		afterB = append(afterB, id)
+		return nil
+	}))
+	require.Len(t, afterB, 1, "entity B must have exactly one reverse link after repeated relink")
+}

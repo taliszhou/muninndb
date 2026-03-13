@@ -182,6 +182,12 @@ type EngineStore interface {
 	// WriteEntityEngramLink writes a vault-scoped engram→entity link.
 	WriteEntityEngramLink(ctx context.Context, ws [8]byte, engramID ULID, entityName string) error
 
+	// RelinkEntityEngramLink atomically moves a vault-scoped engram link from fromEntity
+	// to toEntity in a single Pebble batch, writing the new 0x20/0x23 keys for toEntity
+	// and deleting the stale 0x20/0x23 keys for fromEntity. Eliminates the crash window
+	// that exists when WriteEntityEngramLink and DeleteEntityEngramLink are called separately.
+	RelinkEntityEngramLink(ctx context.Context, ws [8]byte, engramID ULID, fromEntity, toEntity string) error
+
 	// ScanEntityEngrams scans the 0x23 reverse index for all vault-scoped (ws, engramID)
 	// pairs that mention the given entity name. Calls fn for each pair until fn returns
 	// a non-nil error or the index is exhausted.

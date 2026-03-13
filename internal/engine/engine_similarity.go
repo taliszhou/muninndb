@@ -157,15 +157,13 @@ func (e *Engine) MergeEntity(ctx context.Context, vault, entityA, entityB string
 		return result, nil
 	}
 
-	// Step 1: relink each engram from A to B and delete the stale A links.
-	// Both operations are needed: writing the B link establishes the new association;
-	// deleting the A link removes the ghost that would otherwise persist in the 0x23 index.
+	// Step 1: atomically relink each engram from A to B.
+	// RelinkEntityEngramLink writes the new 0x20/0x23 links for B and deletes the
+	// stale 0x20/0x23 links for A in a single Pebble batch, eliminating any crash
+	// window where the engram would appear linked to both or neither entity.
 	for _, id := range engramIDs {
-		if err := e.store.WriteEntityEngramLink(ctx, ws, id, entityB); err != nil {
-			return nil, fmt.Errorf("merge_entity: relink engram %s to entity_b: %w", id.String(), err)
-		}
-		if err := e.store.DeleteEntityEngramLink(ctx, ws, id, entityA); err != nil {
-			return nil, fmt.Errorf("merge_entity: remove stale link for engram %s entity_a: %w", id.String(), err)
+		if err := e.store.RelinkEntityEngramLink(ctx, ws, id, entityA, entityB); err != nil {
+			return nil, fmt.Errorf("merge_entity: relink engram %s from entity_a to entity_b: %w", id.String(), err)
 		}
 	}
 

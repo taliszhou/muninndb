@@ -224,6 +224,39 @@ func (ps *PebbleStore) WriteEntityEngramLink(ctx context.Context, ws [8]byte, en
 	return batch.Commit(pebble.NoSync)
 }
 
+// RelinkEntityEngramLink atomically moves a vault-scoped engram link from fromEntity
+// to toEntity in a single Pebble batch. It writes the 0x20 forward and 0x23 reverse
+// keys for toEntity and deletes the corresponding keys for fromEntity — four key
+// operations committed together, eliminating any crash window where the engram would
+// appear linked to both entities or to neither.
+//
+// This is the correct primitive for MergeEntity: calling WriteEntityEngramLink(B)
+// followed by a separate DeleteEntityEngramLink(A) leaves a window between two commits
+// where a crash yields inconsistent state. RelinkEntityEngramLink removes that window.
+func (ps *PebbleStore) RelinkEntityEngramLink(ctx context.Context, ws [8]byte, engramID ULID, fromEntity, toEntity string) error {
+	fromHash := keys.EntityNameHash(fromEntity)
+	toHash := keys.EntityNameHash(toEntity)
+	id := [16]byte(engramID)
+
+	batch := ps.db.NewBatch()
+	defer batch.Close()
+	// Write new links for toEntity.
+	if err := batch.Set(keys.EntityEngramLinkKey(ws, id, toHash), []byte(toEntity), nil); err != nil {
+		return fmt.Errorf("relink entity engram link: set fwd: %w", err)
+	}
+	if err := batch.Set(keys.EntityReverseIndexKey(toHash, ws, id), nil, nil); err != nil {
+		return fmt.Errorf("relink entity engram link: set rev: %w", err)
+	}
+	// Delete stale links for fromEntity.
+	if err := batch.Delete(keys.EntityEngramLinkKey(ws, id, fromHash), nil); err != nil {
+		return fmt.Errorf("relink entity engram link: del fwd: %w", err)
+	}
+	if err := batch.Delete(keys.EntityReverseIndexKey(fromHash, ws, id), nil); err != nil {
+		return fmt.Errorf("relink entity engram link: del rev: %w", err)
+	}
+	return batch.Commit(pebble.NoSync)
+}
+
 // DeleteEntityEngramLink deletes the 0x20 forward key and 0x23 reverse key for a
 // specific (engram, entity) pair atomically in a single Pebble batch.
 // Used by MergeEntity to remove stale links for the merged-away entity A after
