@@ -166,9 +166,12 @@ func (e *Engine) ReplayEnrichment(ctx context.Context, vault string, stages []st
 		}
 
 		// Skip engrams that have failed too many times this session.
-		if v, ok := e.replayFailCounts.Load(eng.ID); ok && v.(int) >= maxReplayFails {
+		e.replayFailMu.Lock()
+		failCount := e.replayFailCounts[eng.ID]
+		e.replayFailMu.Unlock()
+		if failCount >= maxReplayFails {
 			slog.Debug("replay enrichment: skipping persistently failing engram",
-				"id", eng.ID.String(), "fails", v.(int))
+				"id", eng.ID.String(), "fails", failCount)
 			skipped++
 			continue
 		}
@@ -190,18 +193,19 @@ func (e *Engine) ReplayEnrichment(ctx context.Context, vault string, stages []st
 				continue
 			}
 			// Track consecutive failures; skip if threshold reached next time.
-			prev := 0
-			if v, ok := e.replayFailCounts.Load(eng.ID); ok {
-				prev = v.(int)
-			}
-			e.replayFailCounts.Store(eng.ID, prev+1)
+			e.replayFailMu.Lock()
+			e.replayFailCounts[eng.ID]++
+			newCount := e.replayFailCounts[eng.ID]
+			e.replayFailMu.Unlock()
 			slog.Warn("replay enrichment: enrich failed, skipping",
-				"id", eng.ID.String(), "err", enrichErr, "fail_count", prev+1)
+				"id", eng.ID.String(), "err", enrichErr, "fail_count", newCount)
 			failed++
 			continue
 		}
 		// Success — clear any prior failure count.
-		e.replayFailCounts.Delete(eng.ID)
+		e.replayFailMu.Lock()
+		delete(e.replayFailCounts, eng.ID)
+		e.replayFailMu.Unlock()
 
 		// Persist enrichment results (summary, key_points, memory_type, type_label).
 		if updateErr := e.store.UpdateDigest(ctx, eng.ID, result.Summary, result.KeyPoints, result.MemoryType, result.TypeLabel); updateErr != nil {
@@ -324,5 +328,7 @@ func (e *Engine) SetReplayEnrichTimeout(d time.Duration) {
 // ResetReplayFailCount clears the in-session failure counter for the given engram,
 // allowing ReplayEnrichment to attempt it again after a manual reset.
 func (e *Engine) ResetReplayFailCount(id storage.ULID) {
-	e.replayFailCounts.Delete(id)
+	e.replayFailMu.Lock()
+	delete(e.replayFailCounts, id)
+	e.replayFailMu.Unlock()
 }
