@@ -262,9 +262,15 @@ func (e *Engine) runMerge(job *vaultjob.Job, wsSource, wsTarget [8]byte, sourceV
 
 	// Optionally delete the source vault after merge.
 	if deleteSource {
-		if err := e.DeleteVault(ctx, sourceVault); err != nil {
+		deleteCtx := ctx
+		if ctx.Err() != nil {
+			deleteCtx = context.Background()
+		}
+		if err := e.deleteVault(deleteCtx, sourceVault); err != nil {
+			e.jobManager.Fail(job, fmt.Errorf("post-merge source cleanup: %w", err))
 			slog.Warn("post-merge source vault deletion failed; source vault still exists",
 				"vault", sourceVault, "err", err)
+			return
 		}
 	}
 

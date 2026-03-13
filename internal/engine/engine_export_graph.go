@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"sort"
 
 	"github.com/scrypster/muninndb/internal/storage"
@@ -32,6 +33,14 @@ type ExportGraph struct {
 // If includeEngrams is true the entity type is enriched from the entity record table.
 // Edges are deduplicated by (From, To, RelType): only the highest-weight record per triple is kept.
 func (e *Engine) ExportGraph(ctx context.Context, vault string, includeEngrams bool) (*ExportGraph, error) {
+	if !e.beginVaultOp() {
+		return nil, fmt.Errorf("engine is shutting down")
+	}
+	defer e.endVaultOp()
+
+	opCtx, stop := e.vaultOpContext(ctx)
+	defer stop()
+
 	ws := e.store.ResolveVaultPrefix(vault)
 
 	// Deduplicate edges by (From, To, RelType): keep highest weight per triple.
@@ -39,7 +48,7 @@ func (e *Engine) ExportGraph(ctx context.Context, vault string, includeEngrams b
 	edgeBest := make(map[edgeKey]GraphEdge)
 	nodeSet := make(map[string]struct{})
 
-	err := e.store.ScanRelationships(ctx, ws, func(rec storage.RelationshipRecord) error {
+	err := e.store.ScanRelationships(opCtx, ws, func(rec storage.RelationshipRecord) error {
 		k := edgeKey{From: rec.FromEntity, To: rec.ToEntity, RelType: rec.RelType}
 		existing, seen := edgeBest[k]
 		if !seen || rec.Weight > existing.Weight {
@@ -65,9 +74,13 @@ func (e *Engine) ExportGraph(ctx context.Context, vault string, includeEngrams b
 
 	nodes := make([]GraphNode, 0, len(nodeSet))
 	for name := range nodeSet {
+		if err := opCtx.Err(); err != nil {
+			return nil, err
+		}
+
 		node := GraphNode{ID: name}
 		if includeEngrams {
-			if rec, recErr := e.store.GetEntityRecord(ctx, name); recErr == nil && rec != nil {
+			if rec, recErr := e.store.GetEntityRecord(opCtx, name); recErr == nil && rec != nil {
 				node.Type = rec.Type
 			}
 		}

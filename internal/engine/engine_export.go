@@ -20,6 +20,9 @@ func (e *Engine) ExportVault(ctx context.Context, vaultName, embedderModel strin
 	}
 	defer e.endVaultOp()
 
+	opCtx, stop := e.vaultOpContext(ctx)
+	defer stop()
+
 	names, err := e.store.ListVaultNames()
 	if err != nil {
 		return nil, fmt.Errorf("export vault: list vaults: %w", err)
@@ -41,7 +44,7 @@ func (e *Engine) ExportVault(ctx context.Context, vaultName, embedderModel strin
 		Dimension:     dimension,
 		ResetMetadata: resetMeta,
 	}
-	result, err := e.store.ExportVaultData(ctx, ws, vaultName, opts, w)
+	result, err := e.store.ExportVaultData(opCtx, ws, vaultName, opts, w)
 	if err != nil {
 		return nil, fmt.Errorf("export vault %q: %w", vaultName, err)
 	}

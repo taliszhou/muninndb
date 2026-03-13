@@ -197,10 +197,12 @@ type Engine struct {
 	// Long-running vault job goroutines (clone, merge, reembed, import).
 	jobWG      sync.WaitGroup
 	jobStopped atomic.Bool
-	// Synchronous vault-operation entrypoints (StartClone/StartMerge/StartImport/
-	// StartReembed/ExportVault) can still touch Pebble before they hand work off
-	// to a tracked background goroutine. Fence and drain them separately so Stop()
-	// does not return while one of these setup paths is still racing DB teardown.
+	// Synchronous vault-operation entrypoints (clone/import/export setup, vault
+	// maintenance, graph export, pruning) can still touch Pebble before they hand
+	// work off to a tracked background goroutine, or without spawning one at all.
+	// Fence and drain them separately so Stop() does not return while one of
+	// these direct Pebble-touching paths is still racing DB teardown.
+	vaultOpMu      sync.RWMutex
 	vaultOpWG      sync.WaitGroup
 	vaultOpStopped atomic.Bool
 
@@ -468,7 +470,9 @@ func (e *Engine) Stop() {
 		// so goroutines see a cancelled context, and before wg.Wait() calls below.
 		e.fireAndForgetStopped.Store(true)
 		e.jobStopped.Store(true)
+		e.vaultOpMu.Lock()
 		e.vaultOpStopped.Store(true)
+		e.vaultOpMu.Unlock()
 
 		if e.autoAssoc != nil {
 			e.autoAssoc.Stop()
@@ -622,16 +626,41 @@ func (e *Engine) spawnJob(fn func()) bool {
 // touch Pebble before handing off to a tracked background job. Returns false if
 // the engine is shutting down and the caller should fail fast.
 func (e *Engine) beginVaultOp() bool {
-	e.vaultOpWG.Add(1) // Add FIRST — visible to wg.Wait() in Stop()
+	e.vaultOpMu.RLock()
 	if e.vaultOpStopped.Load() {
-		e.vaultOpWG.Done()
+		e.vaultOpMu.RUnlock()
 		return false
 	}
+	e.vaultOpWG.Add(1)
+	e.vaultOpMu.RUnlock()
 	return true
 }
 
 func (e *Engine) endVaultOp() {
 	e.vaultOpWG.Done()
+}
+
+// vaultOpContext returns a context that is cancelled when either the caller's
+// context is done or the engine begins shutting down. Long-running synchronous
+// vault operations should use this so Stop() can actively interrupt them rather
+// than only waiting for the fixed vaultOpWG drain timeout.
+func (e *Engine) vaultOpContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		if e.stopCtx != nil {
+			return e.stopCtx, func() {}
+		}
+		return context.Background(), func() {}
+	}
+	if e.stopCtx == nil || ctx == e.stopCtx {
+		return ctx, func() {}
+	}
+
+	opCtx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(e.stopCtx, cancel)
+	return opCtx, func() {
+		stop()
+		cancel()
+	}
 }
 
 // SetCoordinator wires the Lobe's ClusterCoordinator so Activate() can forward
@@ -2648,6 +2677,14 @@ func (e *Engine) ResolveVaultPlasticity(vaultName string) auth.ResolvedPlasticit
 // persist in the relevance bucket index and cause an infinite prune loop.
 // Returns the number of engrams pruned.
 func (e *Engine) PruneVault(ctx context.Context, vaultName string) (int64, error) {
+	if !e.beginVaultOp() {
+		return 0, fmt.Errorf("engine is shutting down")
+	}
+	defer e.endVaultOp()
+
+	opCtx, stop := e.vaultOpContext(ctx)
+	defer stop()
+
 	mu := e.getVaultMutex(vaultName)
 	mu.Lock()
 	defer mu.Unlock()
@@ -2660,7 +2697,7 @@ func (e *Engine) PruneVault(ctx context.Context, vaultName string) (int64, error
 	// MaxEngrams: two-phase prune — use stale relevance index as pre-filter, then
 	// re-rank candidates by real ACT-R base-level score to delete the worst engrams.
 	if resolved.MaxEngrams > 0 {
-		count := e.store.GetVaultCount(ctx, ws)
+		count := e.store.GetVaultCount(opCtx, ws)
 		excess := count - int64(resolved.MaxEngrams)
 		if excess > 0 {
 			// Phase 1: fetch heuristic candidates from the relevance bucket index.
@@ -2668,7 +2705,7 @@ func (e *Engine) PruneVault(ctx context.Context, vaultName string) (int64, error
 			topK := int(excess) * 2
 			var candidates []storage.ULID
 			for attempt := 0; attempt < 2; attempt++ {
-				ids, err := e.store.LowestRelevanceIDs(ctx, ws, topK)
+				ids, err := e.store.LowestRelevanceIDs(opCtx, ws, topK)
 				if err != nil {
 					return pruned, fmt.Errorf("prune vault %s (max_engrams scan): %w", vaultName, err)
 				}
@@ -2691,7 +2728,7 @@ func (e *Engine) PruneVault(ctx context.Context, vaultName string) (int64, error
 			scored := make([]scoredCandidate, 0, len(candidates))
 
 			if len(candidates) > 0 {
-				metas, err := e.store.GetMetadata(ctx, ws, candidates)
+				metas, err := e.store.GetMetadata(opCtx, ws, candidates)
 				if err != nil {
 					// Fall back: delete candidates in index order without rescoring.
 					metas = nil
@@ -2723,7 +2760,7 @@ func (e *Engine) PruneVault(ctx context.Context, vaultName string) (int64, error
 			}
 			for i := 0; i < toDelete; i++ {
 				id := scored[i].id
-				if err := e.store.DeleteEngram(ctx, ws, id); err != nil {
+				if err := e.store.DeleteEngram(opCtx, ws, id); err != nil {
 					slog.Debug("prune vault: hard-delete failed", "vault", vaultName, "id", id, "err", err)
 					continue
 				}
@@ -2749,12 +2786,12 @@ func (e *Engine) PruneVault(ctx context.Context, vaultName string) (int64, error
 		// EngramIDsByCreatedRange with epoch→cutoff returns IDs of old engrams.
 		const retentionBatchSize = 500
 		epoch := time.Unix(0, 0)
-		ids, err := e.store.EngramIDsByCreatedRange(ctx, ws, epoch, cutoff, retentionBatchSize)
+		ids, err := e.store.EngramIDsByCreatedRange(opCtx, ws, epoch, cutoff, retentionBatchSize)
 		if err != nil {
 			return pruned, fmt.Errorf("prune vault %s (retention scan): %w", vaultName, err)
 		}
 		for _, id := range ids {
-			if err := e.store.DeleteEngram(ctx, ws, id); err != nil {
+			if err := e.store.DeleteEngram(opCtx, ws, id); err != nil {
 				slog.Debug("prune vault: retention hard-delete failed", "vault", vaultName, "id", id, "err", err)
 				continue
 			}

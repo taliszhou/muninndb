@@ -117,6 +117,10 @@ func (s *NetworkStreamer) Stream(ctx context.Context) error {
 
 	drainAvailable := func() error {
 		for {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+
 			entries, err := s.log.ReadSince(s.lastSeq, 1000)
 			if err != nil {
 				return err
@@ -125,6 +129,10 @@ func (s *NetworkStreamer) Stream(ctx context.Context) error {
 				return nil
 			}
 			for _, entry := range entries {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+
 				payload, err := msgpack.Marshal(mbp.ReplEntry{
 					Seq:         entry.Seq,
 					Op:          uint8(entry.Op),
