@@ -640,6 +640,8 @@ func runServer() {
 		fmt.Fprintf(os.Stderr, "  MUNINN_LOCAL_EMBED           Set to \"0\" to disable bundled ONNX embedder\n")
 		fmt.Fprintf(os.Stderr, "  MUNINN_ENRICH_URL            LLM enrichment endpoint URL (optional)\n")
 		fmt.Fprintf(os.Stderr, "  MUNINN_ENRICH_API_KEY        API key for enrichment (or MUNINN_ANTHROPIC_KEY)\n")
+		fmt.Fprintf(os.Stderr, "  MUNINN_HNSW_WARN_THRESHOLD_MB  Emit a warning when HNSW in-memory vector bytes exceed N MB (optional)\n")
+		fmt.Fprintf(os.Stderr, "  MUNINN_HNSW_MAX_MB             Skip HNSW insert (keep Pebble write) when memory exceeds N MB (optional)\n")
 		fmt.Fprintf(os.Stderr, "  MUNINN_LISTEN_HOST           Host to bind all servers to (e.g. 0.0.0.0 for LAN access)\n")
 		fmt.Fprintf(os.Stderr, "  MUNINN_CORS_ORIGINS          Comma-separated CORS allowed origins\n")
 		fmt.Fprintf(os.Stderr, "  MUNINN_MEM_LIMIT_GB          Memory limit in GB (default: 4)\n")
@@ -916,6 +918,31 @@ func runServer() {
 	// Build HNSW registry (multi-vault, lazy-loading)
 	hnswRegistry := hnswpkg.NewRegistry(db)
 
+	// Apply optional memory thresholds from environment variables.
+	//
+	//   MUNINN_HNSW_WARN_THRESHOLD_MB  – emit a throttled slog.Warn when total
+	//                                    in-memory vector bytes exceed this value
+	//                                    (no insert penalty; default: disabled).
+	//   MUNINN_HNSW_MAX_MB             – skip graph insert when total bytes meet
+	//                                    or exceed this value (vector still stored
+	//                                    in Pebble; FTS unaffected; default: disabled).
+	if warnMBStr := os.Getenv("MUNINN_HNSW_WARN_THRESHOLD_MB"); warnMBStr != "" {
+		if warnMB, err := strconv.ParseInt(warnMBStr, 10, 64); err != nil || warnMB <= 0 {
+			slog.Warn("invalid MUNINN_HNSW_WARN_THRESHOLD_MB, ignoring", "value", warnMBStr)
+		} else {
+			hnswRegistry.SetWarnThresholdBytes(warnMB << 20)
+			slog.Info("hnsw: memory warn threshold configured", "warn_threshold_mb", warnMB)
+		}
+	}
+	if maxMBStr := os.Getenv("MUNINN_HNSW_MAX_MB"); maxMBStr != "" {
+		if maxMB, err := strconv.ParseInt(maxMBStr, 10, 64); err != nil || maxMB <= 0 {
+			slog.Warn("invalid MUNINN_HNSW_MAX_MB, ignoring", "value", maxMBStr)
+		} else {
+			hnswRegistry.SetMaxBytes(maxMB << 20)
+			slog.Info("hnsw: hard memory limit configured", "max_mb", maxMB)
+		}
+	}
+
 	// Build activation engine
 	actEngine := activation.New(store, activation.NewFTSAdapter(ftsIndex), activation.NewHNSWAdapter(hnswRegistry), embedder)
 
@@ -1005,6 +1032,16 @@ func runServer() {
 		eng.SetEnrichPlugin(enrichPlugin)
 		if rew, ok := restWrapper.(*rest.RESTEngineWrapper); ok {
 			rew.SetEnricher(enrichPlugin)
+		}
+		// Wire circuit-breaker state-change hook so transitions emit structured
+		// log lines and update the plugin registry health status.
+		if es, ok := enrichPlugin.(interface {
+			SetBreakerStateChangeHook(interface {
+				SetHealthy(name string, healthy bool)
+				SetUnhealthy(name string, err error)
+			})
+		}); ok {
+			es.SetBreakerStateChangeHook(pluginRegistry)
 		}
 	}
 
