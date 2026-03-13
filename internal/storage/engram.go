@@ -119,8 +119,13 @@ func (ps *PebbleStore) GetEngrams(ctx context.Context, wsPrefix [8]byte, ids []U
 	})
 	if err != nil {
 		// Fallback: individual GetEngram calls.
+		slog.Warn("storage: GetEngrams iterator open failed, falling back to individual reads", "err", err)
 		for _, u := range uncached {
-			eng, _ := ps.GetEngram(ctx, wsPrefix, u.id)
+			eng, engErr := ps.GetEngram(ctx, wsPrefix, u.id)
+			if engErr != nil {
+				slog.Warn("storage: GetEngrams fallback read failed", "id", u.id, "err", engErr)
+				continue
+			}
 			result[u.resultIdx] = eng
 		}
 		return result, nil

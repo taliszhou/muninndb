@@ -245,8 +245,18 @@ func NewServer(addr string, engine EngineAPI, authStore *auth.Store, sessionSecr
 	mux.HandleFunc("GET /api/admin/cluster/events", s.withAdminMiddleware(s.handleAdminClusterEvents))
 
 	// Build the global and per-IP rate limiters from env vars with fallback defaults.
-	globalRPS := envIntDefault("MUNINN_RATE_LIMIT_GLOBAL_RPS", 1000)
-	perIPRPS := envIntDefault("MUNINN_RATE_LIMIT_PER_IP_RPS", 100)
+	const defaultGlobalRPS = 1000
+	const defaultPerIPRPS = 100
+	globalRPS := envIntDefault("MUNINN_RATE_LIMIT_GLOBAL_RPS", defaultGlobalRPS)
+	if globalRPS <= 0 {
+		slog.Warn("MUNINN_RATE_LIMIT_GLOBAL_RPS is <= 0, using default", "value", globalRPS, "default", defaultGlobalRPS)
+		globalRPS = defaultGlobalRPS
+	}
+	perIPRPS := envIntDefault("MUNINN_RATE_LIMIT_PER_IP_RPS", defaultPerIPRPS)
+	if perIPRPS <= 0 {
+		slog.Warn("MUNINN_RATE_LIMIT_PER_IP_RPS is <= 0, using default", "value", perIPRPS, "default", defaultPerIPRPS)
+		perIPRPS = defaultPerIPRPS
+	}
 	globalLimiter := rate.NewLimiter(rate.Limit(globalRPS), globalRPS*2)
 	ipCache, _ := lru.New[string, *rate.Limiter](50_000)
 
