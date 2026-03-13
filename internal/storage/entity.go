@@ -483,6 +483,9 @@ func (ps *PebbleStore) ScanRelationships(ctx context.Context, ws [8]byte, fn fun
 			return err
 		}
 	}
+	if err := iter.Error(); err != nil {
+		return fmt.Errorf("scan relationships: iter: %w", err)
+	}
 	return nil
 }
 
