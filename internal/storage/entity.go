@@ -187,21 +187,20 @@ func (ps *PebbleStore) GetEntityRecord(ctx context.Context, name string) (*Entit
 	return &record, nil
 }
 
-// getEntityLock returns a per-entity mutex for the given entity name.
+// getEntityLock returns the stripe mutex for the given entity name.
 // Uses the same NFKC normalization as EntityNameHash for consistent keying.
 func (ps *PebbleStore) getEntityLock(name string) *sync.Mutex {
 	normalized := strings.ToLower(strings.TrimSpace(norm.NFKC.String(name)))
-	m, _ := ps.entityLocks.LoadOrStore(normalized, &sync.Mutex{})
-	return m.(*sync.Mutex)
+	return ps.entityLocks.For([]byte(normalized))
 }
 
-// getCoOccurrenceLock returns a per-pair mutex for the given canonical hash pair.
+// getCoOccurrenceLock returns the stripe mutex for the given canonical hash pair.
 // hashA and hashB must already be canonicalized (hashA <= hashB).
 func (ps *PebbleStore) getCoOccurrenceLock(hashA, hashB [8]byte) *sync.Mutex {
-	// Create a string key from the two 8-byte hashes (16 bytes total)
-	key := string(hashA[:]) + string(hashB[:])
-	m, _ := ps.coOccurrenceLocks.LoadOrStore(key, &sync.Mutex{})
-	return m.(*sync.Mutex)
+	var key [16]byte
+	copy(key[:8], hashA[:])
+	copy(key[8:], hashB[:])
+	return ps.coOccurrenceLocks.For(key[:])
 }
 
 // WriteEntityEngramLink writes a vault-scoped engram→entity link at 0x20
@@ -221,6 +220,59 @@ func (ps *PebbleStore) WriteEntityEngramLink(ctx context.Context, ws [8]byte, en
 	}
 	if err := batch.Set(revKey, nil, nil); err != nil {
 		return fmt.Errorf("write entity link rev: %w", err)
+	}
+	return batch.Commit(pebble.NoSync)
+}
+
+// RelinkEntityEngramLink atomically moves a vault-scoped engram link from fromEntity
+// to toEntity in a single Pebble batch. It writes the 0x20 forward and 0x23 reverse
+// keys for toEntity and deletes the corresponding keys for fromEntity — four key
+// operations committed together, eliminating any crash window where the engram would
+// appear linked to both entities or to neither.
+//
+// This is the correct primitive for MergeEntity: calling WriteEntityEngramLink(B)
+// followed by a separate DeleteEntityEngramLink(A) leaves a window between two commits
+// where a crash yields inconsistent state. RelinkEntityEngramLink removes that window.
+func (ps *PebbleStore) RelinkEntityEngramLink(ctx context.Context, ws [8]byte, engramID ULID, fromEntity, toEntity string) error {
+	fromHash := keys.EntityNameHash(fromEntity)
+	toHash := keys.EntityNameHash(toEntity)
+	id := [16]byte(engramID)
+
+	batch := ps.db.NewBatch()
+	defer batch.Close()
+	// Write new links for toEntity.
+	if err := batch.Set(keys.EntityEngramLinkKey(ws, id, toHash), []byte(toEntity), nil); err != nil {
+		return fmt.Errorf("relink entity engram link: set fwd: %w", err)
+	}
+	if err := batch.Set(keys.EntityReverseIndexKey(toHash, ws, id), nil, nil); err != nil {
+		return fmt.Errorf("relink entity engram link: set rev: %w", err)
+	}
+	// Delete stale links for fromEntity.
+	if err := batch.Delete(keys.EntityEngramLinkKey(ws, id, fromHash), nil); err != nil {
+		return fmt.Errorf("relink entity engram link: del fwd: %w", err)
+	}
+	if err := batch.Delete(keys.EntityReverseIndexKey(fromHash, ws, id), nil); err != nil {
+		return fmt.Errorf("relink entity engram link: del rev: %w", err)
+	}
+	return batch.Commit(pebble.NoSync)
+}
+
+// DeleteEntityEngramLink deletes the 0x20 forward key and 0x23 reverse key for a
+// specific (engram, entity) pair atomically in a single Pebble batch.
+// Used by MergeEntity to remove stale links for the merged-away entity A after
+// relinking each engram to entity B.
+func (ps *PebbleStore) DeleteEntityEngramLink(ctx context.Context, ws [8]byte, engramID ULID, entityName string) error {
+	nameHash := keys.EntityNameHash(entityName)
+	fwdKey := keys.EntityEngramLinkKey(ws, [16]byte(engramID), nameHash)
+	revKey := keys.EntityReverseIndexKey(nameHash, ws, [16]byte(engramID))
+
+	batch := ps.db.NewBatch()
+	defer batch.Close()
+	if err := batch.Delete(fwdKey, nil); err != nil {
+		return fmt.Errorf("delete entity link fwd: %w", err)
+	}
+	if err := batch.Delete(revKey, nil); err != nil {
+		return fmt.Errorf("delete entity link rev: %w", err)
 	}
 	return batch.Commit(pebble.NoSync)
 }
@@ -426,7 +478,216 @@ func (ps *PebbleStore) ScanRelationships(ctx context.Context, ws [8]byte, fn fun
 	return nil
 }
 
-// UpsertRelationshipRecord writes a vault-scoped relationship record at 0x21.
+// ScanEntityRelationships returns all relationship records where entityName appears
+// as fromEntity or toEntity, using the 0x26 relationship entity index for efficient
+// per-entity lookup. This avoids the O(all vault relationships) full scan of
+// ScanRelationships for the common case of querying a single entity's relationships.
+//
+// For each engramID found in the 0x26 index, it scans the per-engram 0x21 prefix and
+// calls fn for every record where fromEntity or toEntity matches entityName.
+func (ps *PebbleStore) ScanEntityRelationships(ctx context.Context, ws [8]byte, entityName string, fn func(record RelationshipRecord) error) error {
+	entityHash := keys.EntityNameHash(entityName)
+	idxPrefix := keys.RelEntityIndexPrefix(ws, entityHash)
+
+	// Collect unique engramIDs from the 0x26 index.
+	idxIter, err := PrefixIterator(ps.db, idxPrefix)
+	if err != nil {
+		return fmt.Errorf("scan entity relationships: idx iter: %w", err)
+	}
+	var engramIDs [][16]byte
+	seen := make(map[[16]byte]struct{})
+	for valid := idxIter.First(); valid; valid = idxIter.Next() {
+		k := idxIter.Key()
+		// Key layout: 0x26(1) | ws(8) | entityHash(8) | engramID(16) = 33 bytes
+		if len(k) != 33 {
+			continue
+		}
+		var id [16]byte
+		copy(id[:], k[17:33])
+		if _, already := seen[id]; !already {
+			seen[id] = struct{}{}
+			engramIDs = append(engramIDs, id)
+		}
+	}
+	if err := idxIter.Close(); err != nil {
+		return fmt.Errorf("scan entity relationships: idx iter close: %w", err)
+	}
+
+	// For each engram, scan its 0x21 keys and filter for records involving entityName.
+	for _, id := range engramIDs {
+		relIter, err := PrefixIterator(ps.db, keys.RelationshipEngramPrefix(ws, id))
+		if err != nil {
+			return fmt.Errorf("scan entity relationships: rel iter for engram: %w", err)
+		}
+		for valid := relIter.First(); valid; valid = relIter.Next() {
+			val := relIter.Value()
+			var rec RelationshipRecord
+			if err := msgpack.Unmarshal(val, &rec); err != nil {
+				continue
+			}
+			if rec.FromEntity != entityName && rec.ToEntity != entityName {
+				continue
+			}
+			if err := fn(rec); err != nil {
+				relIter.Close()
+				return err
+			}
+		}
+		if err := relIter.Close(); err != nil {
+			return fmt.Errorf("scan entity relationships: rel iter close: %w", err)
+		}
+	}
+	return nil
+}
+
+// RelinkRelationshipEntity updates all 0x21 relationship records in vault ws where
+// oldName appears as fromEntity or toEntity, replacing it with newName. The 0x26
+// relationship entity index is updated in the same batch as each 0x21 rewrite: the
+// old-hash entry is deleted and a new-hash entry is written.
+//
+// Called by MergeEntity after relinking engram-entity links so that relationship
+// records stay consistent with the canonical entity name. Each engram's updates are
+// committed in a single batch — delete old 0x21 key, set new 0x21 key (updated name
+// + updated hash in key), delete old 0x26 entry, set new 0x26 entry.
+//
+// If oldName and newName hash identically (same canonical form after normalisation)
+// this is a no-op.
+func (ps *PebbleStore) RelinkRelationshipEntity(ctx context.Context, ws [8]byte, oldName, newName string) error {
+	oldHash := keys.EntityNameHash(oldName)
+	newHash := keys.EntityNameHash(newName)
+	if oldHash == newHash {
+		return nil // same canonical hash — nothing to do
+	}
+
+	// Collect engramIDs referencing oldName via the 0x26 index.
+	idxIter, err := PrefixIterator(ps.db, keys.RelEntityIndexPrefix(ws, oldHash))
+	if err != nil {
+		return fmt.Errorf("relink relationship entity: idx iter: %w", err)
+	}
+	var engramIDs [][16]byte
+	seen := make(map[[16]byte]struct{})
+	for valid := idxIter.First(); valid; valid = idxIter.Next() {
+		k := idxIter.Key()
+		if len(k) != 33 {
+			continue
+		}
+		var id [16]byte
+		copy(id[:], k[17:33])
+		if _, already := seen[id]; !already {
+			seen[id] = struct{}{}
+			engramIDs = append(engramIDs, id)
+		}
+	}
+	if err := idxIter.Close(); err != nil {
+		return fmt.Errorf("relink relationship entity: idx iter close: %w", err)
+	}
+
+	const (
+		relKeyLen        = 42
+		relFromHashStart = 25
+		relToHashStart   = 34
+		relTypeBytePosn  = 33
+	)
+
+	for _, id := range engramIDs {
+		relIter, err := PrefixIterator(ps.db, keys.RelationshipEngramPrefix(ws, id))
+		if err != nil {
+			return fmt.Errorf("relink relationship entity: rel iter: %w", err)
+		}
+
+		type relUpdate struct {
+			oldKey []byte
+			newKey []byte
+			newVal []byte
+		}
+		var updates []relUpdate
+
+		for valid := relIter.First(); valid; valid = relIter.Next() {
+			k := relIter.Key()
+			if len(k) != relKeyLen {
+				continue
+			}
+			var rec RelationshipRecord
+			if err := msgpack.Unmarshal(relIter.Value(), &rec); err != nil {
+				continue
+			}
+			fromMatches := rec.FromEntity == oldName
+			toMatches := rec.ToEntity == oldName
+			if !fromMatches && !toMatches {
+				continue
+			}
+
+			oldKey := make([]byte, relKeyLen)
+			copy(oldKey, k)
+
+			if fromMatches {
+				rec.FromEntity = newName
+			}
+			if toMatches {
+				rec.ToEntity = newName
+			}
+			rec.UpdatedAt = time.Now().UnixNano()
+
+			newVal, err := msgpack.Marshal(rec)
+			if err != nil {
+				relIter.Close()
+				return fmt.Errorf("relink relationship entity: marshal: %w", err)
+			}
+
+			// Build the new 0x21 key — only the changed hash slot(s) differ.
+			var fromHash, toHash [8]byte
+			copy(fromHash[:], k[relFromHashStart:relFromHashStart+8])
+			copy(toHash[:], k[relToHashStart:relToHashStart+8])
+			relTypeByte := k[relTypeBytePosn]
+			if fromMatches {
+				fromHash = newHash
+			}
+			if toMatches {
+				toHash = newHash
+			}
+			newRelKey := keys.RelationshipKey(ws, id, fromHash, relTypeByte, toHash)
+			updates = append(updates, relUpdate{oldKey: oldKey, newKey: newRelKey, newVal: newVal})
+		}
+		if err := relIter.Close(); err != nil {
+			return fmt.Errorf("relink relationship entity: rel iter close: %w", err)
+		}
+		if len(updates) == 0 {
+			continue
+		}
+
+		// Apply all updates for this engram atomically.
+		batch := ps.db.NewBatch()
+		for _, u := range updates {
+			if err := batch.Delete(u.oldKey, nil); err != nil {
+				batch.Close()
+				return fmt.Errorf("relink relationship entity: delete old rel: %w", err)
+			}
+			if err := batch.Set(u.newKey, u.newVal, nil); err != nil {
+				batch.Close()
+				return fmt.Errorf("relink relationship entity: set new rel: %w", err)
+			}
+			// Swap 0x26 index entry: remove old-hash pointer, add new-hash pointer.
+			if err := batch.Delete(keys.RelEntityIndexKey(ws, oldHash, id), nil); err != nil {
+				batch.Close()
+				return fmt.Errorf("relink relationship entity: delete old idx: %w", err)
+			}
+			if err := batch.Set(keys.RelEntityIndexKey(ws, newHash, id), nil, nil); err != nil {
+				batch.Close()
+				return fmt.Errorf("relink relationship entity: set new idx: %w", err)
+			}
+		}
+		if err := batch.Commit(pebble.NoSync); err != nil {
+			batch.Close()
+			return fmt.Errorf("relink relationship entity: commit: %w", err)
+		}
+		batch.Close()
+	}
+	return nil
+}
+
+// UpsertRelationshipRecord writes a vault-scoped relationship record at 0x21 and
+// the corresponding 0x26 relationship entity index entries for both fromEntity and
+// toEntity. All three writes are committed atomically in a single Pebble batch.
 func (ps *PebbleStore) UpsertRelationshipRecord(ctx context.Context, ws [8]byte, engramID ULID, record RelationshipRecord) error {
 	record.UpdatedAt = time.Now().UnixNano()
 	val, err := msgpack.Marshal(record)
@@ -436,8 +697,22 @@ func (ps *PebbleStore) UpsertRelationshipRecord(ctx context.Context, ws [8]byte,
 	fromHash := keys.EntityNameHash(record.FromEntity)
 	toHash := keys.EntityNameHash(record.ToEntity)
 	relTypeByte := relTypeByteFromString(record.RelType)
-	key := keys.RelationshipKey(ws, [16]byte(engramID), fromHash, relTypeByte, toHash)
-	return ps.db.Set(key, val, pebble.NoSync)
+	relKey := keys.RelationshipKey(ws, [16]byte(engramID), fromHash, relTypeByte, toHash)
+	idxFromKey := keys.RelEntityIndexKey(ws, fromHash, [16]byte(engramID))
+	idxToKey := keys.RelEntityIndexKey(ws, toHash, [16]byte(engramID))
+
+	batch := ps.db.NewBatch()
+	defer batch.Close()
+	if err := batch.Set(relKey, val, nil); err != nil {
+		return fmt.Errorf("upsert relationship record: set 0x21: %w", err)
+	}
+	if err := batch.Set(idxFromKey, nil, nil); err != nil {
+		return fmt.Errorf("upsert relationship record: set 0x26 from: %w", err)
+	}
+	if err := batch.Set(idxToKey, nil, nil); err != nil {
+		return fmt.Errorf("upsert relationship record: set 0x26 to: %w", err)
+	}
+	return batch.Commit(pebble.NoSync)
 }
 
 const (
@@ -671,11 +946,25 @@ func (ps *PebbleStore) deleteEntityLinks(ws [8]byte, engramID [16]byte, batch *p
 		}
 		return entityNames, fmt.Errorf("delete entity links: rel iter: %w", err)
 	}
+	// 0x21 key layout: 0x21(1) | ws(8) | engramID(16) | fromHash(8) | relTypeByte(1) | toHash(8) = 42 bytes
+	// fromHash starts at byte 25; toHash starts at byte 34.
+	const relFromHashOffset = 25
+	const relToHashOffset = 34
+	const relKeyLen = 42
 	for valid := relIter.First(); valid; valid = relIter.Next() {
 		k := relIter.Key()
 		keyCopy := make([]byte, len(k))
 		copy(keyCopy, k)
 		batch.Delete(keyCopy, nil)
+		// Also delete the two 0x26 relationship entity index entries.
+		// Extract fromHash and toHash directly from the key bytes — no msgpack decode needed.
+		if len(k) == relKeyLen {
+			var fromHash, toHash [8]byte
+			copy(fromHash[:], k[relFromHashOffset:relFromHashOffset+8])
+			copy(toHash[:], k[relToHashOffset:relToHashOffset+8])
+			batch.Delete(keys.RelEntityIndexKey(ws, fromHash, engramID), nil)
+			batch.Delete(keys.RelEntityIndexKey(ws, toHash, engramID), nil)
+		}
 	}
 	if err := relIter.Close(); err != nil {
 		return nil, fmt.Errorf("delete entity links: rel iter close: %w", err)

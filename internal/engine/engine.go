@@ -153,6 +153,12 @@ type Engine struct {
 	// Set via SetEnrichPlugin after construction.
 	enrichPlugin plugin.EnrichPlugin
 
+	// mergeMu serialises concurrent MergeEntity calls that touch the same entities.
+	// Uses a dedicated stripe array separate from the storage-layer entity locks to
+	// avoid reentrancy deadlock (UpsertEntityRecord acquires storage stripes internally).
+	// See merge_guard.go for the full concurrency contract.
+	mergeMu mergeGuard
+
 	// noveltyJobsDropped counts novelty jobs silently dropped because the channel was full.
 	noveltyJobsDropped atomic.Int64
 

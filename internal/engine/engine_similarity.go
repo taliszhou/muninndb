@@ -46,13 +46,37 @@ func (e *Engine) FindSimilarEntities(ctx context.Context, vault string, threshol
 		return nil, fmt.Errorf("find_similar_entities: scan names: %w", err)
 	}
 
+	// Phase 1: build an inverted trigram index: trigram → []int (indices into names).
+	// This reduces FindSimilarEntities from O(n²) to O(n × T × C) where T is the average
+	// number of trigrams per name (~10) and C is the average candidate count per name
+	// (small at high thresholds). For n=1000 this is ~10K–50K comparisons vs 500K.
+	invertedIdx := make(map[string][]int, len(names)*8)
+	for i, name := range names {
+		for t := range trigrams(name) {
+			invertedIdx[t] = append(invertedIdx[t], i)
+		}
+	}
+
+	// Phase 2: for each name, find candidate indices sharing ≥1 trigram, then compare.
+	// Using j > i avoids duplicate pairs and mirrors the previous double-loop semantics.
+	// Note: trigramSim > 0 iff the trigram sets share at least one entry, so no pair with
+	// sim ≥ threshold > 0 can be missed by the candidate set. At threshold=0 pairs of
+	// entirely different strings are excluded, but that edge case is not meaningful in practice.
 	var pairs []SimilarEntityPair
-	for i := 0; i < len(names); i++ {
-		for j := i + 1; j < len(names); j++ {
-			sim := trigramSim(names[i], names[j])
+	for i, name := range names {
+		candidates := make(map[int]struct{})
+		for t := range trigrams(name) {
+			for _, j := range invertedIdx[t] {
+				if j > i {
+					candidates[j] = struct{}{}
+				}
+			}
+		}
+		for j := range candidates {
+			sim := trigramSim(name, names[j])
 			if sim >= threshold {
 				pairs = append(pairs, SimilarEntityPair{
-					EntityA:    names[i],
+					EntityA:    name,
 					EntityB:    names[j],
 					Similarity: sim,
 				})
@@ -91,6 +115,12 @@ func (e *Engine) MergeEntity(ctx context.Context, vault, entityA, entityB string
 		return nil, fmt.Errorf("merge_entity: entity_a and entity_b must be different")
 	}
 
+	// Serialise concurrent merges that touch either entity.
+	// Acquired before any reads so the read→check→write sequence is atomic
+	// with respect to other MergeEntity calls on the same entities.
+	e.mergeMu.Lock(entityA, entityB)
+	defer e.mergeMu.Unlock(entityA, entityB)
+
 	ws := e.store.ResolveVaultPrefix(vault)
 
 	recA, err := e.store.GetEntityRecord(ctx, entityA)
@@ -99,6 +129,9 @@ func (e *Engine) MergeEntity(ctx context.Context, vault, entityA, entityB string
 	}
 	if recA == nil {
 		return nil, fmt.Errorf("merge_entity: entity_a %q not found", entityA)
+	}
+	if recA.State == "merged" {
+		return nil, fmt.Errorf("merge_entity: entity_a %q is already merged into %q", entityA, recA.MergedInto)
 	}
 
 	recB, err := e.store.GetEntityRecord(ctx, entityB)
@@ -133,11 +166,22 @@ func (e *Engine) MergeEntity(ctx context.Context, vault, entityA, entityB string
 		return result, nil
 	}
 
-	// Step 1: relink each engram from A to B.
+	// Step 1: atomically relink each engram from A to B.
+	// RelinkEntityEngramLink writes the new 0x20/0x23 links for B and deletes the
+	// stale 0x20/0x23 links for A in a single Pebble batch, eliminating any crash
+	// window where the engram would appear linked to both or neither entity.
 	for _, id := range engramIDs {
-		if err := e.store.WriteEntityEngramLink(ctx, ws, id, entityB); err != nil {
-			return nil, fmt.Errorf("merge_entity: relink engram %s to entity_b: %w", id.String(), err)
+		if err := e.store.RelinkEntityEngramLink(ctx, ws, id, entityA, entityB); err != nil {
+			return nil, fmt.Errorf("merge_entity: relink engram %s from entity_a to entity_b: %w", id.String(), err)
 		}
+	}
+
+	// Step 1b: update any 0x21 relationship records that reference entity A by name,
+	// replacing A with B in both the record value and the 0x21 key (which encodes the
+	// entity hash). The 0x26 index is updated in the same batches. This keeps
+	// ScanEntityRelationships("B") returning the complete set after a merge.
+	if err := e.store.RelinkRelationshipEntity(ctx, ws, entityA, entityB); err != nil {
+		return nil, fmt.Errorf("merge_entity: relink relationship records from entity_a to entity_b: %w", err)
 	}
 
 	// Step 2: mark A as merged.
