@@ -3,6 +3,7 @@ package storage
 import (
 	"encoding/binary"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -69,7 +70,16 @@ func (c *counterCoalescer) run() {
 }
 
 func (c *counterCoalescer) flush() {
-	defer func() { recover() }() // tolerate "pebble: closed" during test teardown
+	defer func() {
+		if r := recover(); r != nil {
+			msg, ok := r.(string)
+			if ok && (strings.Contains(msg, "pebble: closed") || strings.Contains(msg, "pebble: cleaned up")) {
+				// Known teardown panic — swallow silently.
+				return
+			}
+			slog.Warn("storage: unexpected panic in counter flush", "panic", r)
+		}
+	}()
 	var buf [8]byte
 	c.m.Range(func(k, v any) bool {
 		ws := k.([8]byte)

@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/scrypster/muninndb/internal/config"
+	"github.com/scrypster/muninndb/internal/engine/circuit"
 	"github.com/scrypster/muninndb/internal/plugin"
 	"github.com/scrypster/muninndb/internal/plugin/llmstats"
 	"github.com/scrypster/muninndb/internal/storage"
@@ -29,6 +31,13 @@ type LLMProviderConfig struct {
 	Temperature float32 // 0.0 for deterministic extraction (default: 0.0)
 }
 
+// defaultBreaker thresholds: 5 consecutive failures open the circuit;
+// it probes again after 30 s.
+const (
+	breakerMaxFails   = 5
+	breakerResetAfter = 30 * time.Second
+)
+
 // EnrichService implements plugin.EnrichPlugin.
 type EnrichService struct {
 	provider  LLMProvider
@@ -40,6 +49,11 @@ type EnrichService struct {
 	provCfg   *plugin.ProviderConfig
 	mu        sync.Mutex
 	closed    bool
+
+	// breaker guards all LLM calls. It is constructed at service creation time
+	// so it is always non-nil. OnStateChange may be wired after construction
+	// (before concurrent use) to emit logs and update the plugin registry.
+	breaker *circuit.Breaker
 }
 
 // NewEnrichService creates an EnrichService from a provider URL.
@@ -67,6 +81,7 @@ func NewEnrichService(providerURL string) (*EnrichService, error) {
 		provider: prov,
 		provCfg:  provCfg,
 		name:     name,
+		breaker:  circuit.New(breakerMaxFails, breakerResetAfter),
 	}
 
 	return es, nil
@@ -135,7 +150,46 @@ func (s *EnrichService) SetEnrichConfig(cfg *config.PluginConfig) {
 	}
 }
 
+// SetBreakerStateChangeHook wires a callback on the internal circuit breaker so
+// that state transitions emit structured log lines and update the plugin registry.
+// It must be called once, before concurrent use (i.e. before Start/Init).
+//
+// When the circuit opens, the callback emits slog.Warn and calls registry.SetUnhealthy.
+// When the circuit recovers (→ Closed), it emits slog.Info and calls registry.SetHealthy.
+func (s *EnrichService) SetBreakerStateChangeHook(registry interface {
+	SetHealthy(name string, healthy bool)
+	SetUnhealthy(name string, err error)
+}) {
+	pluginName := s.name
+	providerName := string(s.provCfg.Scheme)
+	s.breaker.OnStateChange = func(ev circuit.StateChangeEvent) {
+		switch ev.To {
+		case circuit.StateOpen:
+			slog.Warn("enrich: circuit breaker opened — LLM provider unhealthy",
+				"plugin", pluginName,
+				"provider", providerName,
+				"failure_count", ev.FailureCount,
+				"state", "open",
+			)
+			registry.SetUnhealthy(pluginName, fmt.Errorf("circuit breaker open after %d consecutive failures", ev.FailureCount))
+		case circuit.StateClosed:
+			slog.Info("enrich: circuit breaker recovered — LLM provider healthy",
+				"plugin", pluginName,
+				"provider", providerName,
+				"failure_count", ev.FailureCount,
+				"state", "closed",
+				"outage_duration", ev.OutageDuration.Round(time.Second).String(),
+			)
+			registry.SetHealthy(pluginName, true)
+		}
+	}
+}
+
 // Enrich processes one engram and returns enrichment data.
+// The call is gated by the internal circuit breaker: if the LLM provider has
+// been failing consecutively, ErrOpen is returned immediately without hitting
+// the network. If the breaker is nil (e.g. when constructing EnrichService
+// directly in tests), the pipeline is called without circuit-breaker gating.
 func (s *EnrichService) Enrich(ctx context.Context, eng *storage.Engram) (*plugin.EnrichmentResult, error) {
 	s.mu.Lock()
 	if s.closed {
@@ -148,7 +202,18 @@ func (s *EnrichService) Enrich(ctx context.Context, eng *storage.Engram) (*plugi
 		return nil, fmt.Errorf("enrich service not initialized")
 	}
 
-	return s.pipeline.Run(ctx, eng)
+	// Fast path: no circuit breaker (test construction or future embedded use).
+	if s.breaker == nil {
+		return s.pipeline.Run(ctx, eng)
+	}
+
+	var result *plugin.EnrichmentResult
+	err := s.breaker.Do(func() error {
+		var runErr error
+		result, runErr = s.pipeline.Run(ctx, eng)
+		return runErr
+	})
+	return result, err
 }
 
 // LLMStats returns a point-in-time snapshot of LLM call metrics.

@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -97,8 +98,7 @@ func (r *Registry) Unregister(name string) error {
 
 	// Call Close on the plugin
 	if err := p.Close(); err != nil {
-		// Log the error but don't fail the unregister
-		// The plugin should still be removed from the registry
+		slog.Warn("plugin: close failed during unregister", "name", name, "err", err)
 	}
 
 	// Remove from registry

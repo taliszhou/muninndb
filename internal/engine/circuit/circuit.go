@@ -22,6 +22,17 @@ const (
 	StateOpen                  // fast-fail, no calls forwarded
 )
 
+// StateChangeEvent carries metadata about a circuit state transition.
+// It is passed to the OnStateChange callback (if set) on every transition.
+// The callback is invoked while the breaker's lock is NOT held, so it is
+// safe to call registry methods or emit logs without risk of deadlock.
+type StateChangeEvent struct {
+	From          State
+	To            State
+	FailureCount  int
+	OutageDuration time.Duration // non-zero only when recovering (Open→Closed or HalfOpen→Closed)
+}
+
 // Breaker is a simple three-state circuit breaker.
 // It is safe for concurrent use.
 type Breaker struct {
@@ -29,11 +40,17 @@ type Breaker struct {
 	state            State
 	consecutiveFails int
 	lastFailTime     time.Time
+	openedAt         time.Time // set when transitioning to Open; used to compute outage duration on recovery
 	halfOpenUsed     bool
 
 	// Configuration
 	maxFails    int           // consecutive failures before opening
 	resetAfter  time.Duration // time open before half-open probe
+
+	// OnStateChange is called (outside the lock) whenever the circuit transitions
+	// between states. It may be nil. Set it once at construction time via
+	// NewWithOptions or by direct assignment before any concurrent use.
+	OnStateChange func(ev StateChangeEvent)
 }
 
 // New creates a Breaker with the given thresholds.
@@ -83,27 +100,66 @@ func (b *Breaker) Allow() error {
 // RecordSuccess records a successful call. Closes the circuit if it was half-open.
 func (b *Breaker) RecordSuccess() {
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	prev := b.state
+	fails := b.consecutiveFails
+	var outage time.Duration
+	if prev == StateOpen || prev == StateHalfOpen {
+		outage = time.Since(b.openedAt)
+	}
 	b.consecutiveFails = 0
 	b.state = StateClosed
 	b.halfOpenUsed = false
+	cb := b.OnStateChange
+	b.mu.Unlock()
+
+	if cb != nil && prev != StateClosed {
+		cb(StateChangeEvent{
+			From:           prev,
+			To:             StateClosed,
+			FailureCount:   fails,
+			OutageDuration: outage,
+		})
+	}
 }
 
 // RecordFailure records a failed call. Opens the circuit if failures exceed maxFails.
 func (b *Breaker) RecordFailure() {
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	prev := b.state
 	b.consecutiveFails++
 	b.lastFailTime = time.Now()
+	var ev StateChangeEvent
+	var cb func(StateChangeEvent)
+	transitioned := false
 	if b.state == StateHalfOpen || b.consecutiveFails >= b.maxFails {
+		// Capture failure count before the half-open reset so the event carries
+		// the actual count that triggered the transition, not the post-reset zero.
+		failCount := b.consecutiveFails
 		// Reset consecutiveFails when transitioning back from half-open to open so
 		// the next probe cycle starts from a clean slate rather than an already-
 		// elevated counter that would cause the circuit to re-open faster than intended.
 		if b.state == StateHalfOpen {
 			b.consecutiveFails = 0
 		}
+		if b.state != StateOpen {
+			b.openedAt = time.Now()
+		}
 		b.state = StateOpen
 		b.halfOpenUsed = false
+		if prev != StateOpen {
+			transitioned = true
+			ev = StateChangeEvent{
+				From:         prev,
+				To:           StateOpen,
+				FailureCount: failCount,
+			}
+			cb = b.OnStateChange
+		}
+	}
+	b.mu.Unlock()
+
+	if transitioned && cb != nil {
+		cb(ev)
 	}
 }
 

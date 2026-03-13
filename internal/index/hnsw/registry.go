@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/cockroachdb/pebble"
 )
@@ -18,7 +20,19 @@ type Registry struct {
 	db             *pebble.DB
 	efConstruction int // 0 → use package default (200)
 	efSearch       int // 0 → use package default (50)
+
+	// Memory thresholds (bytes). Zero means no limit / no warning.
+	warnThresholdBytes int64 // emit slog.Warn when total vector bytes exceed this
+	maxBytes           int64 // skip HNSW insert when total vector bytes exceed this
+
+	// throttle state for periodic memory warnings (one warn per 60 s max)
+	lastWarnNano  atomic.Int64 // Unix nano of last slog.Warn emission
+	hardLimitHit  atomic.Bool  // true after the first hard-limit hit (changes log level)
+	lastHardNano  atomic.Int64 // Unix nano of last hard-limit log emission
 }
+
+// warnThrottleInterval is the minimum gap between repeated memory-warning log lines.
+const warnThrottleInterval = 60 * time.Second
 
 // NewRegistry creates a new Registry backed by the provided Pebble database.
 func NewRegistry(db *pebble.DB) *Registry {
@@ -50,6 +64,22 @@ func NewRegistryWithParams(db *pebble.DB, efConstruction, efSearch int) *Registr
 		efConstruction: efConstruction,
 		efSearch:       efSearch,
 	}
+}
+
+// SetWarnThresholdBytes configures the soft warning threshold.
+// When total in-memory vector bytes exceed this value, a throttled slog.Warn
+// is emitted (at most once per 60 s). Zero disables the threshold.
+func (r *Registry) SetWarnThresholdBytes(n int64) {
+	r.warnThresholdBytes = n
+}
+
+// SetMaxBytes configures the hard OOM backstop.
+// When total in-memory vector bytes already meet or exceed this limit, the
+// Insert call skips adding the vector to the in-memory graph (the vector is
+// still stored in Pebble, so the write succeeds and FTS remains intact).
+// Zero disables the hard limit.
+func (r *Registry) SetMaxBytes(n int64) {
+	r.maxBytes = n
 }
 
 // getOrCreate returns the per-vault Index, creating it lazily if it doesn't exist.
@@ -154,13 +184,76 @@ func (r *Registry) TombstoneNode(ws [8]byte, id [16]byte) {
 	}
 }
 
+// maybeLogMemoryPressure emits throttled warning logs when memory thresholds are
+// exceeded. It returns true if the hard limit is active and the insert should be
+// skipped.
+//
+// Design: two independent throttle clocks — one for soft-warn, one for hard-limit.
+// Both use atomic CAS on Unix-nanosecond timestamps so no lock is needed.
+func (r *Registry) maybeLogMemoryPressure(totalBytes int64) (skipInsert bool) {
+	const mb = 1 << 20
+
+	// Hard limit check.
+	if r.maxBytes > 0 && totalBytes >= r.maxBytes {
+		now := time.Now().UnixNano()
+		last := r.lastHardNano.Load()
+		elapsed := time.Duration(now - last)
+		if elapsed >= warnThrottleInterval && r.lastHardNano.CompareAndSwap(last, now) {
+			if !r.hardLimitHit.Swap(true) {
+				// First time hitting the hard limit: emit slog.Error.
+				slog.Error("hnsw: hard memory limit reached — skipping graph insert (embedding stored in Pebble; semantic search degraded to FTS)",
+					"total_mb", totalBytes/int64(mb),
+					"limit_mb", r.maxBytes/int64(mb),
+				)
+			} else {
+				// Subsequent hits: throttled slog.Warn.
+				slog.Warn("hnsw: hard memory limit still exceeded — continuing to skip graph inserts",
+					"total_mb", totalBytes/int64(mb),
+					"limit_mb", r.maxBytes/int64(mb),
+				)
+			}
+		}
+		return true
+	}
+
+	// Soft warn threshold.
+	if r.warnThresholdBytes > 0 && totalBytes >= r.warnThresholdBytes {
+		now := time.Now().UnixNano()
+		last := r.lastWarnNano.Load()
+		elapsed := time.Duration(now - last)
+		if elapsed >= warnThrottleInterval && r.lastWarnNano.CompareAndSwap(last, now) {
+			slog.Warn("hnsw: in-memory vector size exceeds warning threshold",
+				"total_mb", totalBytes/int64(mb),
+				"warn_threshold_mb", r.warnThresholdBytes/int64(mb),
+			)
+		}
+	}
+
+	return false
+}
+
 // Insert adds a vector to the appropriate per-vault Index.
+// If the hard memory limit (SetMaxBytes) is set and already met, the vector is
+// stored in Pebble but skipped in the in-memory graph: the write succeeds and
+// FTS remains intact; only semantic (HNSW) search degrades gracefully.
 func (r *Registry) Insert(ctx context.Context, ws [8]byte, id [16]byte, vec []float32) error {
 	idx := r.getOrCreate(ws)
+
 	// Store vector first so the graph can fetch it during traversal.
 	if err := idx.StoreVector(id, vec); err != nil {
 		return err
 	}
+
+	// Check memory thresholds before touching the in-memory graph.
+	// TotalVectorBytes acquires RLock internally; safe here.
+	if r.maxBytes > 0 || r.warnThresholdBytes > 0 {
+		totalBytes := r.TotalVectorBytes()
+		if r.maybeLogMemoryPressure(totalBytes) {
+			// Hard limit hit: skip graph insert. Vector is already in Pebble.
+			return nil
+		}
+	}
+
 	// If the in-memory graph insertion panics or a future error path is added,
 	// clean up the orphaned vector so it is never stranded in storage unreachable
 	// by graph traversal.
