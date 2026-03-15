@@ -190,9 +190,17 @@ func extractOperation(args []string) (op string, rest []string) {
 			rest = append(args[:i:i], args[i+1:]...)
 			return op, rest
 		}
-		// It's a flag. Skip the value too if the flag doesn't use "=" form.
+		// It's a flag. Skip the value token too, but only when one actually
+		// follows and doesn't look like another flag. Without this guard a
+		// missing value causes the next token (the operation name) to be
+		// silently consumed as the flag's value, returning ("", args) and
+		// producing a confusing "unknown operation: " error.
 		if !strings.Contains(arg, "=") {
-			i += 2 // flag + value
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				i += 2 // flag + value
+			} else {
+				i++ // boolean flag or missing value — skip flag only
+			}
 		} else {
 			i++
 		}
