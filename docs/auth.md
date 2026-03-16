@@ -64,7 +64,7 @@ vault: default
 | Mode | Reads | Cognitive state writes | Use case |
 |------|-------|------------------------|----------|
 | `full` | Yes | **Yes** — temporal scores refresh, Hebbian weights update, access counts increment | AI agents, primary integrations, anything that is *part of* the brain |
-| `observe` | Yes | **No** — scores are computed but nothing is persisted | Dashboards, analytics, read-only partners, exports |
+| `observe` | Yes | **No** — mutating REST routes and gRPC RPCs return `403` before the engine is reached; engine-layer cognitive mutations are also suppressed | Dashboards, analytics, read-only partners, exports |
 
 The `observe` mode exists because the vault's cognitive state is the thing of value. A dashboard reading engrams 1000 times a day should not inflate access counts and distort what the AI agent sees as relevant. `observe` keys see the brain; they don't affect it, and semantically mutating REST routes are rejected.
 
@@ -256,7 +256,7 @@ If each user had their own relevance weights, the vault would have N brains inst
 | Session tokens | HMAC-SHA256 signed, 24h TTL, HttpOnly cookie |
 | Transport | HTTP by default; run behind TLS-terminating proxy in production |
 | Key revocation | Immediate, no grace period |
-| Observe isolation | Enforced in engine activation layer — not just an honor system |
+| Observe isolation | Enforced at both the transport layer (`ReadOnlyGuard` on REST, `denyReadOnlyMutation` on gRPC) and the engine activation layer — not just an honor system |
 | Encryption at rest | Not built-in — use OS/volume encryption; see [self-hosting guide](self-hosting.md#encryption-at-rest) |
 
 ---
