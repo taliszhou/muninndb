@@ -28,7 +28,8 @@ An intent-organized reading guide. Start with what you want to understand.
 ## If you want to use MuninnDB
 
 1. **[Quickstart](quickstart.md)** — Getting MuninnDB running and making your first memory writes.
-2. **[Feature Reference](feature-reference.md)** — Complete reference for all 35 MCP tools and their parameters.
+2. **[Agent Prompting](agent-prompting.md)** — System prompt patterns that make agents save proactively, not just reactively.
+3. **[Feature Reference](feature-reference.md)** — Complete reference for all 35 MCP tools and their parameters.
 
 ---
 
@@ -50,6 +51,7 @@ An intent-organized reading guide. Start with what you want to understand.
 
 1. **[Self-Hosting](self-hosting.md)** — Deployment options, environment variables, and data directory setup.
 2. **[Cluster Operations](cluster-operations.md)** — Multi-node clustering, replication, and leader election.
+3. **[Claude.com / ChatGPT via Traefik](integrations/traefik-claude-chatgpt.md)** — Connect a cloud-hosted MuninnDB to Claude.com Connectors or ChatGPT's MCP support.
 
 ---
 
