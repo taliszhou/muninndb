@@ -59,6 +59,8 @@ func main() {
 		runStatus()
 	case "exec":
 		runExec(rest)
+	case "dream":
+		runDream(rest)
 	case "backup":
 		runBackup(rest)
 	case "upgrade":

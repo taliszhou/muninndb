@@ -56,6 +56,7 @@ This document is the authoritative reference for every prefix in the system. Upd
 | 0x21 | Entity Relationship | Vault | `ws(8) \| engramID(16) \| fromHash(8) \| relTypeByte(1) \| toHash(8)` | NoSync | Typed relationship between two entities, scoped to an engram. |
 | 0x23 | Entity Reverse Index | Cross-vault | `nameHash(8) \| ws(8) \| engramID(16)` | NoSync | Entity←engram reverse lookup across vaults. Always written atomically with 0x20. |
 | 0x24 | Entity Co-occurrence | Vault | `ws(8) \| hashA(8) \| hashB(8)` | NoSync | Pairwise entity co-occurrence count. Hash pair is canonically ordered (hashA < hashB). |
+| 0x27 | Dream State | Vault | `ws(8)` | NoSync→Sync | Per-vault dream consolidation state (last run time, engram count at run). Also used for global dream-due flag with zero vault prefix. |
 
 \* Engram (0x01) and Metadata (0x02) default to Sync. When `NoSyncEngrams=true`, they move to NoSync tier (WAL syncer provides ≤10ms durability).
 
@@ -85,7 +86,7 @@ Derived indexes that accelerate filtered queries. Each maps a single attribute (
 
 ### Configuration and Metadata (0x0E, 0x0F, 0x11, 0x12, 0x13, 0x15, 0x17, 0x19, 0x1D)
 
-Singleton or low-cardinality keys that store per-vault configuration (vault name, scoring weights, migration versions, embedding model marker, coherence counter) and global operational state (vault name index, digest flags, idempotency receipts). The vault engram count (0x15) is the only key in this group that uses `pebble.Sync` — it enforces storage quotas and must survive crashes to prevent over-allocation.
+Singleton or low-cardinality keys that store per-vault configuration (vault name, scoring weights, migration versions, embedding model marker, coherence counter) and global operational state (vault name index, digest flags, idempotency receipts). The vault engram count (0x15) is the only key in this group that uses `pebble.Sync` — it enforces storage quotas and must survive crashes to prevent over-allocation. Dream state (0x27) tracks the last dream run time and engram count at that time, using Sync durability to prevent over-consolidation.
 
 ### Structural Layer (0x16, 0x1A, 0x1C, 0x1E)
 
