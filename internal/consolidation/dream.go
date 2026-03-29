@@ -29,7 +29,7 @@ func (w *Worker) DreamOnce(ctx context.Context, opts DreamOpts) (*DreamReport, e
 	dreport := &DreamReport{}
 
 	// TODO: enforce trigger gates (time >= 12h + volume >= 3 engrams) when Force is false.
-	// ReadDreamState/WriteDreamState are implemented but gate logic is deferred to PR #2.
+	// ReadDreamState/WriteDreamState are implemented but gate logic is deferred to a follow-up PR.
 
 	// Resolve which vaults to process.
 	var vaults []string

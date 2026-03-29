@@ -56,7 +56,7 @@ This document is the authoritative reference for every prefix in the system. Upd
 | 0x21 | Entity Relationship | Vault | `ws(8) \| engramID(16) \| fromHash(8) \| relTypeByte(1) \| toHash(8)` | NoSync | Typed relationship between two entities, scoped to an engram. |
 | 0x23 | Entity Reverse Index | Cross-vault | `nameHash(8) \| ws(8) \| engramID(16)` | NoSync | Entity←engram reverse lookup across vaults. Always written atomically with 0x20. |
 | 0x24 | Entity Co-occurrence | Vault | `ws(8) \| hashA(8) \| hashB(8)` | NoSync | Pairwise entity co-occurrence count. Hash pair is canonically ordered (hashA < hashB). |
-| 0x27 | Dream State | Vault | `ws(8)` | NoSync→Sync | Per-vault dream consolidation state (last run time, engram count at run). Also used for global dream-due flag with zero vault prefix. |
+| 0x27 | Dream State | Vault | `ws(8)` | **Sync** | Per-vault dream consolidation state (last run time, engram count at run). Also used for global dream-due flag with zero vault prefix. |
 
 \* Engram (0x01) and Metadata (0x02) default to Sync. When `NoSyncEngrams=true`, they move to NoSync tier (WAL syncer provides ≤10ms durability).
 
