@@ -927,18 +927,19 @@ document.addEventListener('alpine:init', () => {
     },
 
     _copyFallback(text) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
       try {
-        const ta = document.createElement('textarea');
-        ta.value = text;
-        ta.style.position = 'fixed';
-        ta.style.opacity = '0';
-        document.body.appendChild(ta);
         ta.select();
         const ok = document.execCommand('copy');
-        document.body.removeChild(ta);
         this.addNotification(ok ? 'success' : 'error', ok ? 'Activity data copied to clipboard' : 'Copy failed — please copy manually');
       } catch (_) {
         this.addNotification('error', 'Copy failed — please copy manually');
+      } finally {
+        document.body.removeChild(ta);
       }
     },
 
@@ -2080,13 +2081,42 @@ document.addEventListener('alpine:init', () => {
     },
 
     async copyToClipboard(text) {
+      // navigator.clipboard requires a secure context (HTTPS or localhost).
+      // Installations accessed over plain HTTP (e.g. a LAN IP like
+      // 192.168.x.x:8476) have navigator.clipboard === undefined, causing
+      // the previous implementation to always throw and show an error toast.
+      // Fall back to the legacy execCommand path for non-secure contexts.
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        try {
+          await navigator.clipboard.writeText(text);
+          this.connectCopied = true;
+          setTimeout(() => { this.connectCopied = false; }, 2000);
+          this.addNotification('success', 'Copied to clipboard');
+          return;
+        } catch (_) {
+          // Fall through to execCommand fallback.
+        }
+      }
+      // execCommand fallback — works on HTTP and older browsers.
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
       try {
-        await navigator.clipboard.writeText(text);
-        this.connectCopied = true;
-        setTimeout(() => { this.connectCopied = false; }, 2000);
-        this.addNotification('success', 'Copied to clipboard');
+        ta.select();
+        const ok = document.execCommand('copy');
+        if (ok) {
+          this.connectCopied = true;
+          setTimeout(() => { this.connectCopied = false; }, 2000);
+          this.addNotification('success', 'Copied to clipboard');
+        } else {
+          this.addNotification('error', 'Copy failed — please select and copy manually');
+        }
       } catch (_) {
-        this.addNotification('error', 'Copy failed — select and copy manually');
+        this.addNotification('error', 'Copy failed — please select and copy manually');
+      } finally {
+        document.body.removeChild(ta);
       }
     },
 
@@ -2450,9 +2480,29 @@ document.addEventListener('alpine:init', () => {
 
     copyToken() {
       if (!this.clusterToken?.token) return;
-      navigator.clipboard.writeText(this.clusterToken.token).catch(() => {});
-      this.clusterTokenCopied = true;
-      setTimeout(() => { this.clusterTokenCopied = false; }, 2000);
+      const text = this.clusterToken.token;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+          this.clusterTokenCopied = true;
+          setTimeout(() => { this.clusterTokenCopied = false; }, 2000);
+        }).catch(() => {});
+        return;
+      }
+      // execCommand fallback for non-secure contexts (plain HTTP LAN installs).
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      try {
+        ta.select();
+        if (document.execCommand('copy')) {
+          this.clusterTokenCopied = true;
+          setTimeout(() => { this.clusterTokenCopied = false; }, 2000);
+        }
+      } finally {
+        document.body.removeChild(ta);
+      }
     },
 
     async loadClusterSettings() {
