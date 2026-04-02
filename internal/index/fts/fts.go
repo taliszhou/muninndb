@@ -10,10 +10,34 @@ import (
 	"unicode"
 
 	"github.com/cockroachdb/pebble"
+	"github.com/go-ego/gse"
 	"github.com/kljensen/snowball"
 	"github.com/scrypster/muninndb/internal/metrics"
 	"github.com/scrypster/muninndb/internal/storage/keys"
 )
+
+// seg is the package-level gse segmenter (loaded once with embedded dictionaries).
+var (
+	seg     gse.Segmenter
+	segOnce sync.Once
+)
+
+// initSeg lazily initializes the gse segmenter with embedded dictionaries.
+// gse ships with a comprehensive Chinese dictionary (~12MB) embedded via go:embed.
+func initSeg() {
+	segOnce.Do(func() {
+		// Load embedded dictionaries (zh + en, ~300K words)
+		seg.LoadDict()
+	})
+}
+
+// LoadUserDict loads additional user-defined dictionary entries.
+// Each entry is "word frequency pos" (e.g. "aimemkb 10 n").
+// Call this after MuninnDB.Open() to add domain-specific terms.
+func LoadUserDict(path string) error {
+	initSeg()
+	return seg.LoadDict(path)
+}
 
 const (
 	k1 = 1.2
@@ -42,6 +66,15 @@ var stopWords = map[string]bool{
 	"are": true, "been": true, "have": true, "has": true, "had": true, "do": true,
 	"does": true, "did": true, "will": true, "would": true, "could": true, "should": true,
 	"may": true, "might": true, "can": true, "as": true, "if": true, "then": true,
+	// Chinese stop words (common particles, conjunctions, etc.)
+	"的": true, "了": true, "在": true, "是": true, "我": true, "有": true, "和": true,
+	"就": true, "不": true, "人": true, "都": true, "一": true, "一个": true, "上": true,
+	"也": true, "很": true, "到": true, "说": true, "要": true, "去": true, "你": true,
+	"会": true, "着": true, "没有": true, "看": true, "好": true, "自己": true, "这": true,
+	"他": true, "她": true, "它": true, "们": true, "那": true, "里": true, "些": true,
+	"么": true, "什么": true, "吗": true, "呢": true, "啊": true, "吧": true, "把": true,
+	"被": true, "比": true, "从": true, "对": true, "而": true, "给": true, "还": true,
+	"让": true, "所": true, "为": true, "与": true, "之": true, "中": true, "及": true,
 }
 
 // ScoredID is a scored search result.
@@ -84,20 +117,85 @@ func (idx *Index) InvalidateIDFCache() {
 	idx.mu.Unlock()
 }
 
-// tokenizeRaw applies lowercase, character normalization, length filtering,
-// and stopword removal — but NOT stemming. Used for backward-compatible
-// dual-path search against un-migrated (pre-stemming) indexes.
-func tokenizeRaw(text string) []string {
-	text = strings.ToLower(text)
-	var b strings.Builder
+// isCJK reports whether the rune is a CJK ideograph (Chinese/Japanese/Korean).
+func isCJK(r rune) bool {
+	return unicode.Is(unicode.Han, r) ||
+		unicode.Is(unicode.Hiragana, r) ||
+		unicode.Is(unicode.Katakana, r) ||
+		unicode.Is(unicode.Hangul, r)
+}
+
+// hasCJK reports whether the text contains any CJK characters.
+func hasCJK(text string) bool {
 	for _, r := range text {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == ' ' {
-			b.WriteRune(r)
-		} else {
-			b.WriteRune(' ')
+		if isCJK(r) {
+			return true
 		}
 	}
-	tokens := strings.Fields(b.String())
+	return false
+}
+
+// tokenizeRaw applies tokenization with multilingual support:
+//   - CJK text (Chinese/Japanese/Korean): uses gse segmenter in search-engine mode
+//     which produces both full words and sub-words for better BM25 recall.
+//   - Latin text (English, etc.): space-splitting + lowercase + stopword removal.
+//
+// Both paths apply length filtering and stopword removal.
+func tokenizeRaw(text string) []string {
+	text = strings.ToLower(text)
+
+	if hasCJK(text) {
+		return tokenizeCJK(text)
+	}
+	return tokenizeLatin(text)
+}
+
+// tokenizeCJK uses gse search-engine mode for CJK text segmentation.
+// Search mode produces both full words and sub-words, e.g.:
+//
+//	"记忆系统设计" → ["记忆系统", "记忆", "系统", "设计"]
+//
+// This maximizes BM25 recall: both "记忆系统" and "记忆" queries match.
+// Non-CJK runs within mixed text (e.g. "aimemkb知识库") are handled as Latin tokens.
+func tokenizeCJK(text string) []string {
+	initSeg()
+
+	// gse search mode: produces both full compound words and their sub-components
+	segments := seg.CutSearch(text, true) // true = use HMM for new words
+
+	result := make([]string, 0, len(segments))
+	for _, s := range segments {
+		s = strings.TrimSpace(s)
+		if len(s) == 0 {
+			continue
+		}
+		// Length filter: single ASCII char or single-rune CJK stop words
+		runes := []rune(s)
+		if len(runes) == 1 && !isCJK(runes[0]) {
+			continue
+		}
+		if stopWords[s] {
+			continue
+		}
+		if len(runes) > 64 {
+			s = string(runes[:64])
+		}
+		result = append(result, s)
+	}
+	return result
+}
+
+// tokenizeLatin handles English/Latin text using the original space-based tokenizer.
+func tokenizeLatin(text string) []string {
+	var buf strings.Builder
+	for _, r := range text {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == ' ' {
+			buf.WriteRune(r)
+		} else {
+			buf.WriteRune(' ')
+		}
+	}
+	tokens := strings.Fields(buf.String())
 	result := tokens[:0]
 	for _, t := range tokens {
 		if len(t) < 2 {
@@ -114,12 +212,17 @@ func tokenizeRaw(text string) []string {
 	return result
 }
 
-// Tokenize applies tokenizeRaw then Porter2 stemming.
-// New engrams are indexed with stemmed tokens via this function.
+// Tokenize applies tokenizeRaw then Porter2 stemming for English tokens.
+// CJK tokens are kept as-is (stemming is meaningless for ideographic languages).
 func Tokenize(text string) []string {
 	raw := tokenizeRaw(text)
 	out := make([]string, 0, len(raw))
 	for _, tok := range raw {
+		// Skip stemming for CJK tokens
+		if hasCJK(tok) {
+			out = append(out, tok)
+			continue
+		}
 		stemmed, err := snowball.Stem(tok, "english", true)
 		if err == nil && stemmed != "" {
 			out = append(out, stemmed)
